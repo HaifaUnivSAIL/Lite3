@@ -81,12 +81,29 @@ C++ SDK to deploy trained RL policies on Lite3 platforms (x86 or Jetson NX).
 
 ```bash
 git clone --recurse-submodules https://github.com/DeepRoboticsLab/Lite3_rl_deploy.git
-cd Lite3_rl_deploy
-mkdir build && cd build
+# Set working directory (replace if cloned elsewhere)
+cd ~/lite3_project
 
-# For x86 build without simulation
-cmake .. -DBUILD_PLATFORM=x86 -DBUILD_SIM=OFF -DSEND_REMOTE=OFF
-make -j$(nproc)
+# Download and extract LibTorch (CUDA 12.1 build, compatible with CUDA 12.0)
+wget https://download.pytorch.org/libtorch/cu121/libtorch-cxx11-abi-shared-with-deps-2.3.0%2Bcu121.zip -O libtorch_cuda121.zip
+unzip libtorch_cuda121.zip -d libtorch
+
+# Go to the rl_deploy package
+cd Lite3_rl_deploy
+
+# Create a build directory
+mkdir -p build && cd build
+
+# Run CMake with the correct Torch path and build options
+cmake .. \
+  -DBUILD_PLATFORM=x86 \
+  -DBUILD_SIM=off \
+  -DSEND_REMOTE=OFF \
+  -DTorch_DIR=$(realpath ../../libtorch/share/cmake/Torch) \
+  -DCMAKE_PREFIX_PATH=$(realpath ../../libtorch)
+
+# Build the deployment binaries
+make -j4
 ```
 
 ---
