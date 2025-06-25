@@ -8,7 +8,7 @@ The `lite3_project` repository integrates all the software components needed to 
 
 ```
 lite3_project/
-├── Lite3_rl_training/     # RL training pipeline using Isaac Gym and RSL-RL
+├── Lite3_rl_training/     # RL training pipeline using Isaac Gym and RSL-RL - YOU NEED TO CLONE THAT - LOOK BELOW
 ├── Lite3_rl_deploy/       # C++ SDK for policy deployment on Lite3
 ├── lite3_ws/              # ROS 1 workspace (for legacy/noetic build)
 ├── Lite3_MotionSDK-main/  # Official Lite3 Motion SDK from DeepRobotics
@@ -80,6 +80,7 @@ C++ SDK to deploy trained RL policies on Lite3 platforms (x86 or Jetson NX).
 ### 🔧 Setup
 
 ```bash
+git clone --recurse-submodules https://github.com/DeepRoboticsLab/Lite3_rl_deploy.git
 cd Lite3_rl_deploy
 mkdir build && cd build
 
