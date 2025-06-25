@@ -10,10 +10,8 @@ The `lite3_project` repository integrates all the software components needed to 
 lite3_project/
 ├── Lite3_rl_training/     # RL training pipeline using Isaac Gym and RSL-RL
 ├── Lite3_rl_deploy/       # C++ SDK for policy deployment on Lite3
-├── Lite3_ROS/             # ROS 1 packages (e.g., message_transformer)
 ├── lite3_ws/              # ROS 1 workspace (for legacy/noetic build)
 ├── Lite3_MotionSDK-main/  # Official Lite3 Motion SDK from DeepRobotics
-└── Papers/                # (Optional) Research papers and notes
 ```
 
 ---
