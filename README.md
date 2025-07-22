@@ -55,18 +55,11 @@ This module allows training policies in simulation using Isaac Gym and the RSL-R
 ### 🔧 Setup
 
 ```bash
-cd Lite3_rl_training
-
-# Ensure Isaac Gym is placed in: ./isaacgym/
-# This should include folders like 'gymapi', 'gymtorch', etc.
-
-# Install legged_gym
-cd legged_gym
-pip install -e .
-
-# Install RSL-RL
-cd ../rsl_rl
-pip install -e .
+# Go to https://developer.nvidia.com/isaac-gym/download 
+# Download the IsaacGym_Preview_4_Package.tar.gz file 
+# Extract the isaacgym folder into the Lite3 folder" 
+# Then run the following script:
+    ./setup_Lite3_rl_training.sh
 ```
 
 > ⚠️ Make sure your CUDA version and GPU driver are compatible with Isaac Gym Preview 4.
