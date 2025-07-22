@@ -1,0 +1,2 @@
+# Ignore the manually extracted isaacgym folder (if exists):
+/isaacgym/
