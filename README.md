@@ -54,11 +54,12 @@ This module allows training policies in simulation using Isaac Gym and the RSL-R
 
 ### 🔧 Setup
 
+Go to https://developer.nvidia.com/isaac-gym/download 
+Download the IsaacGym_Preview_4_Package.tar.gz file 
+Extract the isaacgym folder into the Lite3 folder" 
+Then run the following script:
+
 ```bash
-# Go to https://developer.nvidia.com/isaac-gym/download 
-# Download the IsaacGym_Preview_4_Package.tar.gz file 
-# Extract the isaacgym folder into the Lite3 folder" 
-# Then run the following script:
     ./setup_Lite3_rl_training.sh
 ```
 For more information and usage go to https://github.com/DeepRoboticsLab/Lite3_rl_training#
