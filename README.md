@@ -61,6 +61,7 @@ This module allows training policies in simulation using Isaac Gym and the RSL-R
 # Then run the following script:
     ./setup_Lite3_rl_training.sh
 ```
+For more information and usage go to https://github.com/DeepRoboticsLab/Lite3_rl_training#
 
 > ⚠️ Make sure your CUDA version and GPU driver are compatible with Isaac Gym Preview 4.
 
