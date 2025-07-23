@@ -4,6 +4,14 @@
 set -e
 echo "This script will follow the instructions in https://github.com/DeepRoboticsLab/Lite3_rl_training# and automatically install: Lite3_rl_training"
 
+PROJ_PATH=$PWD
+echo "Fixing the missing file libpython3.8.so.1.0"
+#find $CONDA_PREFIX -name "libpython3.8.so.1.0"
+mkdir -p $HOME/anaconda3/envs/lite3_env/etc/conda/activate.d
+echo 'export LD_LIBRARY_PATH="$CONDA_PREFIX/lib:$LD_LIBRARY_PATH"' > $HOME/anaconda3/envs/lite3_env/etc/conda/activate.d/env_vars.sh
+
+mkdir -p $HOME/anaconda3/envs/lite3_env/etc/conda/deactivate.d
+echo 'export LD_LIBRARY_PATH=${LD_LIBRARY_PATH#"$CONDA_PREFIX/lib:"}' > $HOME/anaconda3/envs/lite3_env/etc/conda/deactivate.d/env_vars.sh
 git clone git@github.com:DeepRoboticsLab/Lite3_rl_training.git
 
 # Clone legged_gym
@@ -43,7 +51,7 @@ if ! conda env list | grep -q "^$ENV_NAME\s"; then
     # Step 4: Install Python dependencies
     echo "Installing Python dependencies..."
     pip install transformations matplotlib gym tensorboard numpy==1.23.5
-    
+    pip install setuptools==58.0.4
 else
     echo "✅ Conda environment '$ENV_NAME' already exists. Skipping creation."
 fi
@@ -53,17 +61,17 @@ conda activate $ENV_NAME
 echo "Go to https://developer.nvidia.com/isaac-gym/download download the IsaacGym_Preview_4_Package.tar.gz file and extract the isaacgym folder into Lite3 folder"
 read -p "Press Enter once you've downloaded and extracted Isaac Gym..."
 
-cd /home/jmuller/SAIL-Projects/Lite3/isaacgym/python
+cd $PROJ_PATH/isaacgym/python
 pip install -e .
 
 
 # Step 6: Install legged_gym and rsl_rl
 echo "Installing rsl_rl..."
-cd /home/jmuller/SAIL-Projects/Lite3/Lite3_rl_training/rsl_rl/
+cd $PROJ_PATH/Lite3_rl_training/rsl_rl/
 pip install -e .
 
 echo "Installing legged_gym..."
-cd /home/jmuller/SAIL-Projects/Lite3/Lite3_rl_training/legged_gym/
+cd $PROJ_PATH/Lite3_rl_training/legged_gym/
 pip install -e .
 
 cd ..
