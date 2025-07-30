@@ -12,7 +12,7 @@ echo 'export LD_LIBRARY_PATH="$CONDA_PREFIX/lib:$LD_LIBRARY_PATH"' > $HOME/anaco
 
 mkdir -p $HOME/anaconda3/envs/lite3_env/etc/conda/deactivate.d
 echo 'export LD_LIBRARY_PATH=${LD_LIBRARY_PATH#"$CONDA_PREFIX/lib:"}' > $HOME/anaconda3/envs/lite3_env/etc/conda/deactivate.d/env_vars.sh
-git clone git@github.com:DeepRoboticsLab/Lite3_rl_training.git
+#git clone git@github.com:DeepRoboticsLab/Lite3_rl_training.git
 
 # Clone legged_gym
 #git clone https://github.com/leggedrobotics/legged_gym.git
