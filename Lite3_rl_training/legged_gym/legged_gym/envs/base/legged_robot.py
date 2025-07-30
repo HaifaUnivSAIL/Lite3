@@ -319,6 +319,17 @@ class LeggedRobot(BaseTask):
             ) * self.reward_scales["termination"]
             self.rew_buf += rew
             self.episode_sums["termination"] += rew
+        if "torso_upright" in self.reward_scales:
+            rew = self._reward_torso_upright()
+            self.rew_buf += rew * self.reward_scales["torso_upright"]
+
+        if "front_legs_up" in self.reward_scales:
+            rew = self._reward_front_legs_up()
+            self.rew_buf += rew * self.reward_scales["front_legs_up"]
+
+        if "foot_stillness" in self.reward_scales:
+            rew = self._reward_foot_stillness()
+            self.rew_buf += rew * self.reward_scales["foot_stillness"]
 
     def compute_observations(self):
         self.original_obs_buf = torch.cat(
@@ -1515,6 +1526,30 @@ class LeggedRobot(BaseTask):
                                             self.default_dof_pos[:, self.penalize_joint_ids]), \
                                         dim=1)
             return abad_joint_reward
+        
+    def _reward_torso_upright(self):
+        """
+        Rewards alignment of the torso's quaternion with the upright pose.
+        Reference quaternion is identity: [0, 0, 0, 1]
+        """
+        target_quat = torch.tensor([0.0, 0.0, 0.0, 1.0], device=self.device)
+        # Dot product between current and target quaternion
+        dot = torch.sum(self.base_quat * target_quat, dim=1)
+        # Normalize to get alignment reward in [0, 1]
+        reward = dot ** 2  # (cos(θ/2))^2 ∈ [0, 1]
+        return reward
+
+
+    def _reward_front_legs_up(self):
+        contacts = self.contact_filt  # shape [N, 4]
+        fl = contacts[:, 0]
+        fr = contacts[:, 1]
+        return 1.0 - (fl + fr).clamp(0, 1)  # 1 if both off, 0 if either touching
+
+    def _reward_foot_stillness(self):
+        foot_velocities = self.root_states[:, 7:10]  # or use proper frame transform
+        speed = torch.norm(foot_velocities, dim=1)
+        return torch.clamp(1.0 - speed / 1.0, min=0.0)
 
     # def _reward_feet_height(self):
     #     # Penalize feet height error
