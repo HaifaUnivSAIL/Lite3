@@ -58,22 +58,29 @@ class TwoLegStandCfg(LeggedRobotCfg):
         foot_stillness_reward_weight = 1.0
 
         class scales(LeggedRobotCfg.rewards.scales):
-            orientation = -1.0
-            base_height = -0.5
-            stand_still = 0.5
-            torques = -0.0001
-            action_rate = -0.01
-            collision = -1.0
-            termination = -10.0
-
-            # NEW: encourage torso uprightness
             torso_upright = 3.0
+            # hind_knee_extension = 7.0
+            hind_leg_extension_geom = 4.0
+            front_legs_up = 1.0
+            base_height = -0.5
+            termination = -10.0
+            # orientation = -1.0
+            # base_height = -0.5
+            stand_still = 1.0
+            # torques = -0.0001
+            # action_rate = -0.01
+            # collision = -1.0
+            # termination = -10.0
 
-            # NEW: reward front legs off ground
-            front_legs_up = 2.0
+            # # NEW: encourage torso uprightness
+            # torso_upright = 3.0
 
-            # NEW: reward for stable feet (discourage thrashing)
-            foot_stillness = 0.5
+            # # NEW: reward front legs off ground
+            front_legs_up = 1.0
+            # # NEW: reward for hind knee extension
+            # hind_knee_extension = 2.0
+            # # NEW: reward for stable feet (discourage thrashing)
+            # foot_stillness = 1.0
 
             # Disabled locomotion terms
             tracking_lin_vel = 0.0

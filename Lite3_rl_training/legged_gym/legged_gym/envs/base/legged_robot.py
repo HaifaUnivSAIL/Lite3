@@ -91,6 +91,26 @@ class LeggedRobot(BaseTask):
 
         # load actuator network
         self.actuator_net = None
+        # printing some states of the robot to hardcode indices later in methods. (debug only)
+        if hasattr(self, "dof_names") and isinstance(self.dof_names, list):
+            print("DOF names and indices:")
+            for i, name in enumerate(self.dof_names):
+                print(f"{i}: {name}")
+        else:
+            print("DOF names not available at this point.")
+        if hasattr(self, "rigid_body_state"):
+            print("Rigid body state shape:", self.rigid_body_state.shape)
+            print("Rigid body positions:")
+            for i in range(self.rigid_body_state.shape[1]):
+                pos = self.rigid_body_state[0, i, :3]  # position of the first environment, i-th rigid body
+                print(f"{i}: Position = {pos}")
+        else:
+            print("Rigid body state not available.")
+
+
+
+
+
 
     def clock(self):
         return self.gym.get_sim_time(self.sim)
@@ -319,17 +339,6 @@ class LeggedRobot(BaseTask):
             ) * self.reward_scales["termination"]
             self.rew_buf += rew
             self.episode_sums["termination"] += rew
-        if "torso_upright" in self.reward_scales:
-            rew = self._reward_torso_upright()
-            self.rew_buf += rew * self.reward_scales["torso_upright"]
-
-        if "front_legs_up" in self.reward_scales:
-            rew = self._reward_front_legs_up()
-            self.rew_buf += rew * self.reward_scales["front_legs_up"]
-
-        if "foot_stillness" in self.reward_scales:
-            rew = self._reward_foot_stillness()
-            self.rew_buf += rew * self.reward_scales["foot_stillness"]
 
     def compute_observations(self):
         self.original_obs_buf = torch.cat(
@@ -1517,6 +1526,7 @@ class LeggedRobot(BaseTask):
 
     def _reward_stand_still(self):
         # Penalize motion at zero commands
+        # print(f"%%%%%%%%%%%%%%%%%%%%%%% stand still function is called. All scales are named including the new ones.")
         if not self.cfg.rewards.still_all:
             return torch.sum(torch.abs(self.dof_pos[:, self.penalize_joint_ids] \
                                     - self.default_dof_pos[:, self.penalize_joint_ids]), dim=1) \
@@ -1529,15 +1539,61 @@ class LeggedRobot(BaseTask):
         
     def _reward_torso_upright(self):
         """
-        Rewards alignment of the torso's quaternion with the upright pose.
-        Reference quaternion is identity: [0, 0, 0, 1]
+        Rewards the robot for aligning its torso X-axis (forward direction)
+        with the world Z-axis (upward).
+        This is equivalent to encouraging a rotation of +90 degrees around Y,
+        i.e., quaternion [0, 0.7071, 0, 0.7071].
         """
-        target_quat = torch.tensor([0.0, 0.0, 0.0, 1.0], device=self.device)
-        # Dot product between current and target quaternion
-        dot = torch.sum(self.base_quat * target_quat, dim=1)
-        # Normalize to get alignment reward in [0, 1]
-        reward = dot ** 2  # (cos(θ/2))^2 ∈ [0, 1]
+        # The projected_gravity is the gravity vector expressed in the base frame
+        # So aligning the X-axis with world Z means gravity should point along -X
+        # i.e., projected_gravity[:, 0] should be close to -1.0
+
+        alignment = -self.projected_gravity[:, 0]  # Want this to be +1.0 when upright
+        reward = alignment.clamp(min=0.0)  # Only positive alignment is rewarded
+        # print(f"%%%%%%%%%%%%%%%%%%%%%%% torso upright function is called. All scales are named including the new ones.")
         return reward
+
+    def _reward_hind_knee_extension(self):
+        """Reward robot for extending hind knees (e.g., promoting standing posture)."""
+        # Pick joint indices
+        hl_knee_idx = 8
+        hr_knee_idx = 11
+        # Extract the angles
+        hl_angle = self.dof_pos[:, hl_knee_idx]
+        hr_angle = self.dof_pos[:, hr_knee_idx]
+        # print(f"%%%%%%%%%%%%%%%%%%%%%%% extension function is called. All scales are named including the new ones. hl_angle={hl_angle}, hr_angle={hr_angle}")
+        # Normalize to 0–1 based on limits if needed; for now assume higher is better
+        reward = hl_angle + hr_angle  # encourages larger angles directly
+
+        return reward
+    
+    def _reward_hind_leg_extension_geom(self):
+        # Indices based on your printout
+        hl_hip_idx = 9
+        hl_foot_idx = 12
+        hr_hip_idx = 13
+        hr_foot_idx = 16
+
+        # Get 3D positions
+        hl_hip_pos = self.rigid_body_state[:, hl_hip_idx, :3]
+        hl_foot_pos = self.rigid_body_state[:, hl_foot_idx, :3]
+        hr_hip_pos = self.rigid_body_state[:, hr_hip_idx, :3]
+        hr_foot_pos = self.rigid_body_state[:, hr_foot_idx, :3]
+
+        # Compute lengths
+        hl_leg_length = torch.norm(hl_foot_pos - hl_hip_pos, dim=1)
+        hr_leg_length = torch.norm(hr_foot_pos - hr_hip_pos, dim=1)
+
+        # Combine and normalize
+        leg_length = (hl_leg_length + hr_leg_length) / 2.0
+
+        # Normalize based on max leg length (e.g. ~0.4m, adjust if known)
+        normalized = torch.clamp(leg_length / 0.4, 0.0, 1.0)
+
+        return normalized
+
+
+
 
 
     def _reward_front_legs_up(self):

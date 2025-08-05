@@ -24,7 +24,6 @@ def train(args):
 
     # prepare environment
     env, env_cfg = task_registry.make_env(name=args.task, args=args, env_cfg=env_cfg)
-
     # load model
     if args.load_run:
         train_cfg.runner.resume = True

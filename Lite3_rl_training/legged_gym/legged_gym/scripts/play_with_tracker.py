@@ -13,7 +13,6 @@ import torch
 from legged_gym.utils import get_args, register
 
 def quat_to_euler_xyz(quat):
-    """Convert quaternion to euler angles [roll, pitch, yaw]"""
     x, y, z, w = quat.unbind(dim=-1)
     t0 = +2.0 * (w * x + y * z)
     t1 = +1.0 - 2.0 * (x * x + y * y)
@@ -55,7 +54,8 @@ def play(args):
     num_envs = env.num_envs
     total_steps = 0
     standing_counts = torch.zeros(num_envs, device=env.device)
-    upright_counts = torch.zeros(num_envs, device=env.device)
+    upright_counts_proj = torch.zeros(num_envs, device=env.device)
+    upright_counts_quat = torch.zeros(num_envs, device=env.device)
     front_contact_counts = torch.zeros(num_envs, device=env.device)
     longest_streaks = torch.zeros(num_envs, device=env.device)
     current_streaks = torch.zeros(num_envs, device=env.device)
@@ -63,7 +63,7 @@ def play(args):
     lin_vel_acc = torch.zeros(num_envs, device=env.device)
     ang_vel_acc = torch.zeros(num_envs, device=env.device)
 
-    IDENTITY_QUAT = torch.tensor([0, 0, 0, 1], device=env.device)
+    TARGET_QUAT = torch.tensor([0, 0.7071, 0, 0.7071], device=env.device)  # 90 deg pitch up
 
     for _ in range(10 * int(env.max_episode_length)):
         with torch.no_grad():
@@ -72,38 +72,48 @@ def play(args):
         obs, privileged_obs, obs_history = obs_dict["obs"], obs_dict["privileged_obs"], obs_dict["obs_history"]
 
         base_quat = env.base_quat  # [N, 4]
-        quat_dot = torch.sum(base_quat * IDENTITY_QUAT, dim=1).abs()
-        upright = quat_dot > 0.95  # equivalent to angle < ~36°
-        upright_counts += upright.int()
+        dot_quat = torch.sum(base_quat * TARGET_QUAT, dim=1).abs()
+        upright_quat = dot_quat > 0.99
+        upright_counts_quat += upright_quat.int()
+
+        proj_g = env.projected_gravity
+        upright_proj = (proj_g[:, 0] < -0.9) & (proj_g[:, 1].abs() < 0.1) & (proj_g[:, 2].abs() < 0.1)
+        upright_counts_proj += upright_proj.int()
 
         contacts = env.contact_filt.int()
         rear_contacts = contacts[:, 2] + contacts[:, 3]
         front_contacts = contacts[:, 0] + contacts[:, 1]
-        standing = (rear_contacts == 2) & (front_contacts == 0)
+        base_z = env.root_states[:, 2]
+        height_ok = base_z > 0.3
+        standing = (rear_contacts == 2) & (front_contacts == 0) & height_ok
+
         standing_counts += standing.int()
         front_contact_counts += (front_contacts > 0).int()
 
         current_streaks = torch.where(standing, current_streaks + 1, torch.zeros_like(current_streaks))
         longest_streaks = torch.max(longest_streaks, current_streaks)
 
-        root_states = env.root_states
-        lin_vel = torch.norm(root_states[:, 7:10], dim=1)
-        ang_vel = torch.norm(root_states[:, 10:13], dim=1)
+        lin_vel = torch.norm(env.base_lin_vel, dim=1)
+        ang_vel = torch.norm(env.base_ang_vel, dim=1)
         lin_vel_acc += lin_vel
         ang_vel_acc += ang_vel
 
         total_steps += 1
 
+    avg_lin_vel = lin_vel_acc / total_steps
+    avg_ang_vel = ang_vel_acc / total_steps
+
     def avg(tensor): return tensor.cpu().numpy() / total_steps
     def stat(tensor): return f"{tensor.mean():.2f} ± {tensor.std():.2f}"
 
     print("\n===== Standing Evaluation Summary =====")
-    print(f"✅ % Time Standing        : {stat(avg(standing_counts * 100))}")
-    print(f"🧍 % Time Upright         : {stat(avg(upright_counts * 100))}")
-    print(f"👣 # Front Foot Contacts   : {stat(front_contact_counts)}")
-    print(f"🕒 Longest Standing Streak: {stat(longest_streaks)}")
-    print(f"📉 Mean Linear Velocity   : {stat(lin_vel_acc)}")
-    print(f"🌀 Mean Angular Velocity  : {stat(ang_vel_acc)}")
+    print(f"✅ % Time Standing         : {stat(avg(standing_counts * 100))}")
+    print(f"🢍 % Upright (projected_g) : {stat(avg(upright_counts_proj * 100))}")
+    print(f"🎯 % Upright (quat match)  : {stat(avg(upright_counts_quat * 100))}")
+    print(f"👣 # Front Foot Contacts    : {stat(front_contact_counts)}")
+    print(f"🕒 Longest Standing Streak : {stat(longest_streaks)}")
+    print(f"📉 Mean Linear Velocity    : {stat(avg_lin_vel)}")
+    print(f"🌀 Mean Angular Velocity   : {stat(avg_ang_vel)}")
     print("========================================\n")
 
 if __name__ == '__main__':
