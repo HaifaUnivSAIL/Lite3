@@ -49,6 +49,7 @@ from legged_gym.utils.torch_math import quat_apply_yaw, wrap_to_pi
 from legged_gym.utils.helpers import class_to_dict
 from .legged_robot_config import LeggedRobotCfg
 import matplotlib
+from legged_gym.utils.curriculum_controller import CurriculumController
 
 matplotlib.use('Agg')
 
@@ -87,6 +88,9 @@ class LeggedRobot(BaseTask):
 
         self.fixed_commands = self.cfg.commands.fixed_commands
         self.curriculum_factor = self.cfg.env.curriculum_factor
+        # -----------------------------------New curriculum controller for general strategies------------------------------#
+        self.curriculum_controller = CurriculumController(self.cfg, self.reward_functions, self.reward_names)
+        # ----------------------------------------------------------------------------------------------------------------- #
         self.height_noise_mean = 0.
 
         # load actuator network
@@ -106,10 +110,6 @@ class LeggedRobot(BaseTask):
                 print(f"{i}: Position = {pos}")
         else:
             print("Rigid body state not available.")
-
-
-
-
 
 
     def clock(self):
@@ -318,6 +318,36 @@ class LeggedRobot(BaseTask):
         if self.cfg.env.send_timeouts:
             self.extras["time_outs"] = self.time_out_buf
 
+    ### ------------------------------------------THIS IS THE CURRICULUM COMPUTE REWARD FUNCTION ------------------------------------------###
+    def compute_reward_curriculum(self):
+        """Compute rewards with curriculum support"""
+        self.rew_buf[:] = 0.
+        ## TODO - Here the update is done into the curriculum controller object, integrate the iteration number into it instead of progress_buff ##
+        self.curriculum_controller.update(self.progress_buf) 
+        ## **Note - fetching attributes from curriculum controller object to env object - this is similar to using env object attr - they are sent in constructor to curr object.
+        reward_scales = self.curriculum_controller.get_current_scales() 
+        reward_funcs = self.curriculum_controller.get_current_functions()
+        reward_names = list(reward_scales.keys())
+        ## TODO - test that the reward names and scales are correct according to cfg file (two_leg_stand_config.py) and phase number (curriculum_controller state)
+        for i, name in enumerate(reward_names):
+            rew = reward_funcs[i]() * reward_scales[name]
+            self.rew_buf += rew
+            self.episode_sums[name] += rew
+
+        if self.cfg.rewards.only_positive_rewards:
+            self.rew_buf[:] = torch.clip(self.rew_buf[:], min=0.)
+
+        if "termination" in self.reward_scales:
+            rew = self._reward_termination() * self.reward_scales["termination"]
+            self.rew_buf += rew
+            self.episode_sums["termination"] += rew
+
+        if self.use_curriculum and self.curriculum_controller.log_rewards:
+            self.curriculum_controller.log_reward_info(self.episode_sums)
+    ### ---------------------------------------------------------------------------------------------------------------------------------###
+
+    ### ------------------------------------------THIS IS THE ORIGINAL COMPUTE REWARD FUNCTION ------------------------------------------###
+    ## TODO - make sure the new compute_reward function (above) is correct in logic (compare to the original below) regarding the scale uses and reward function uses.
     def compute_reward(self):
         """ Compute rewards
             Calls each reward function which had a non-zero scale (processed in self._prepare_reward_function())

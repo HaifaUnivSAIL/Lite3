@@ -94,6 +94,52 @@ class TwoLegStandCfg(LeggedRobotCfg):
             feet_velocity = 0.0
             dof_pos_limits = 0.0
             episode_length = 0.0
+                # Curriculum toggles
+        #  --------------------------- Curriculum cfg part ---------------------------------------------#
+        class curriculum:
+            enabled = True
+            log_curriculum = True
+
+            phases = [
+                {
+                    "name": "phase_0_basic_balance",
+                    "trigger_thresh": 0.0,
+                    "reward_scales": {
+                        "base_height": -0.5,
+                        "hind_leg_extension_geom": 4.0,
+                        "termination": -10.0,
+                        "stand_still": 1.0
+                    }
+                },
+                {
+                    "name": "phase_1_posture_alignment",
+                    "trigger_thresh": 0.4,
+                    "reward_scales": {
+                        "base_height": -0.5,
+                        "hind_leg_extension_geom": 4.0,
+                        "front_legs_up": 1.0,
+                        "torso_upright": 3.0,
+                        "termination": -10.0,
+                        "stand_still": 1.0
+                    }
+                },
+                {
+                    "name": "phase_2_fine_standing",
+                    "trigger_thresh": 0.75,
+                    "reward_scales": {
+                        "base_height": -0.5,
+                        "hind_leg_extension_geom": 4.0,
+                        "front_legs_up": 1.0,
+                        "torso_upright": 3.0,
+                        "foot_stillness": 1.0,
+                        "termination": -10.0,
+                        "stand_still": 1.0
+                    }
+                }
+            ]
+
+        # --------------------------------------------------------------------------------------------- #
+
 
     class normalization(LeggedRobotCfg.normalization):
         dof_history_interval = 1
