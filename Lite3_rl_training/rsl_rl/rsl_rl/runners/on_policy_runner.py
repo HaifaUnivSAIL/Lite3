@@ -118,6 +118,7 @@ class OnPolicyRunner:
             with torch.inference_mode():
                 for i in range(self.num_steps_per_env):
                     actions = self.alg.act(obs, privileged_obs, obs_history)
+                    self.env.env.curriculum_controller.get_progress_buf(buf_element=it)
                     obs_dict, rewards, dones, infos = self.env.step(actions)
                     obs, privileged_obs, obs_history = obs_dict["obs"], obs_dict["privileged_obs"], obs_dict[
                         "obs_history"]

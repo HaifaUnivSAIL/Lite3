@@ -1,3 +1,4 @@
+import numpy as np
 from legged_gym.envs.base.legged_robot_config import LeggedRobotCfg, LeggedRobotCfgPPO
 
 class TwoLegStandCfg(LeggedRobotCfg):
@@ -103,7 +104,7 @@ class TwoLegStandCfg(LeggedRobotCfg):
             phases = [
                 {
                     "name": "phase_0_basic_balance",
-                    "trigger_thresh": 0.0,
+                    "trigger_thresh": 1000,
                     "reward_scales": {
                         "base_height": -0.5,
                         "hind_leg_extension_geom": 4.0,
@@ -113,7 +114,7 @@ class TwoLegStandCfg(LeggedRobotCfg):
                 },
                 {
                     "name": "phase_1_posture_alignment",
-                    "trigger_thresh": 0.4,
+                    "trigger_thresh": 3000,
                     "reward_scales": {
                         "base_height": -0.5,
                         "hind_leg_extension_geom": 4.0,
@@ -125,7 +126,7 @@ class TwoLegStandCfg(LeggedRobotCfg):
                 },
                 {
                     "name": "phase_2_fine_standing",
-                    "trigger_thresh": 0.75,
+                    "trigger_thresh": np.inf,
                     "reward_scales": {
                         "base_height": -0.5,
                         "hind_leg_extension_geom": 4.0,

@@ -319,31 +319,31 @@ class LeggedRobot(BaseTask):
             self.extras["time_outs"] = self.time_out_buf
 
     ### ------------------------------------------THIS IS THE CURRICULUM COMPUTE REWARD FUNCTION ------------------------------------------###
-    def compute_reward_curriculum(self):
-        """Compute rewards with curriculum support"""
-        self.rew_buf[:] = 0.
-        ## TODO - Here the update is done into the curriculum controller object, integrate the iteration number into it instead of progress_buff ##
-        self.curriculum_controller.update(self.progress_buf) 
-        ## **Note - fetching attributes from curriculum controller object to env object - this is similar to using env object attr - they are sent in constructor to curr object.
-        reward_scales = self.curriculum_controller.get_current_scales() 
-        reward_funcs = self.curriculum_controller.get_current_functions()
-        reward_names = list(reward_scales.keys())
-        ## TODO - test that the reward names and scales are correct according to cfg file (two_leg_stand_config.py) and phase number (curriculum_controller state)
-        for i, name in enumerate(reward_names):
-            rew = reward_funcs[i]() * reward_scales[name]
-            self.rew_buf += rew
-            self.episode_sums[name] += rew
-
-        if self.cfg.rewards.only_positive_rewards:
-            self.rew_buf[:] = torch.clip(self.rew_buf[:], min=0.)
-
-        if "termination" in self.reward_scales:
-            rew = self._reward_termination() * self.reward_scales["termination"]
-            self.rew_buf += rew
-            self.episode_sums["termination"] += rew
-
-        if self.use_curriculum and self.curriculum_controller.log_rewards:
-            self.curriculum_controller.log_reward_info(self.episode_sums)
+    # def compute_reward_curriculum(self):
+    #     """Compute rewards with curriculum support"""
+    #     self.rew_buf[:] = 0.
+    #     ## TODO - Here the update is done into the curriculum controller object, integrate the iteration number into it instead of progress_buff ##
+    #     self.curriculum_controller.update(self.progress_buf)
+    #     ## **Note - fetching attributes from curriculum controller object to env object - this is similar to using env object attr - they are sent in constructor to curr object.
+    #     reward_scales = self.curriculum_controller.get_current_scales()
+    #     reward_funcs = self.curriculum_controller.get_current_functions()
+    #     reward_names = list(reward_scales.keys())
+    #     ## TODO - test that the reward names and scales are correct according to cfg file (two_leg_stand_config.py) and phase number (curriculum_controller state)
+    #     for i, name in enumerate(reward_names):
+    #         rew = reward_funcs[i]() * reward_scales[name]
+    #         self.rew_buf += rew
+    #         self.episode_sums[name] += rew
+    #
+    #     if self.cfg.rewards.only_positive_rewards:
+    #         self.rew_buf[:] = torch.clip(self.rew_buf[:], min=0.)
+    #
+    #     if "termination" in self.reward_scales:
+    #         rew = self._reward_termination() * self.reward_scales["termination"]
+    #         self.rew_buf += rew
+    #         self.episode_sums["termination"] += rew
+    #
+    #     if self.use_curriculum and self.curriculum_controller.log_rewards:
+    #         self.curriculum_controller.log_reward_info(self.episode_sums)
     ### ---------------------------------------------------------------------------------------------------------------------------------###
 
     ### ------------------------------------------THIS IS THE ORIGINAL COMPUTE REWARD FUNCTION ------------------------------------------###
@@ -354,13 +354,24 @@ class LeggedRobot(BaseTask):
             adds each terms to the episode sums and to the total reward
         """
         self.rew_buf[:] = 0.
-        for i in range(len(self.reward_functions)):
-            name = self.reward_names[i]
-            # rew = self.reward_functions[i]() * self.reward_scales[name]
-            rew = self.reward_functions[i]() * self.reward_scales[
-                name]  #* self.curriculum_factor
-            self.rew_buf += rew
-            self.episode_sums[name] += rew
+        if self.curriculum_controller.enabled is True:
+            ## TODO - Here the update is done into the curriculum controller object, integrate the iteration number into it instead of progress_buff ##
+
+            self.curriculum_controller.update()
+            ## **Note - fetching attributes from curriculum controller object to env object - this is similar to using env object attr - they are sent in constructor to curr object.
+            ## TODO - test that the reward names and scales are correct according to cfg file (two_leg_stand_config.py) and phase number (curriculum_controller state)
+            for name, reward_function in self.curriculum_controller.current_functions.items():
+                rew = reward_function() * self.curriculum_controller.current_scales[name]
+                self.rew_buf += rew
+                self.episode_sums[name] += rew
+        else:
+            for i in range(len(self.reward_functions)):
+                name = self.reward_names[i]
+                # rew = self.reward_functions[i]() * self.reward_scales[name]
+                rew = self.reward_functions[i]() * self.reward_scales[
+                    name]  #* self.curriculum_factor
+                self.rew_buf += rew
+                self.episode_sums[name] += rew
         if self.cfg.rewards.only_positive_rewards:
             self.rew_buf[:] = torch.clip(self.rew_buf[:], min=0.)
         # add termination reward after clipping
@@ -1630,7 +1641,7 @@ class LeggedRobot(BaseTask):
         contacts = self.contact_filt  # shape [N, 4]
         fl = contacts[:, 0]
         fr = contacts[:, 1]
-        return 1.0 - (fl + fr).clamp(0, 1)  # 1 if both off, 0 if either touching
+        return 1.0 - (fl + fr).float()  # 1 if both off, 0 if either touching
 
     def _reward_foot_stillness(self):
         foot_velocities = self.root_states[:, 7:10]  # or use proper frame transform

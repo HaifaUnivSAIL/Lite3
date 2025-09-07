@@ -3,6 +3,7 @@ class CurriculumController:
         self.cfg = cfg
         self.reward_functions = reward_functions
         self.reward_names = reward_names
+        self.progress_buf = 0
 
         # Parse curriculum settings
         curriculum_cfg = getattr(cfg.rewards, "curriculum", None)
@@ -15,25 +16,19 @@ class CurriculumController:
         self.current_phase = 0
         self.log_rewards = getattr(curriculum_cfg, "log_curriculum", False)
 
-    def update(self, progress_buf):
+    def get_progress_buf(self, buf_element):
+        self.progress_buf = buf_element
+
+    def update(self):
         """Update current curriculum phase based on training progress."""
         if not self.enabled:
             return
-        avg_progress = progress_buf.float().mean().item()
-        for i, phase in enumerate(self.phases):
-            if avg_progress >= phase["trigger_thresh"]:
-                self.current_phase = i
-
-    def get_current_scales(self):
-        if not self.enabled:
-            return {}
-        return self.phases[self.current_phase]["reward_scales"]
-
-    def get_current_functions(self):
-        if not self.enabled:
-            return self.reward_functions
-        active_names = self.get_current_scales().keys()
-        return [f for i, f in enumerate(self.reward_functions) if self.reward_names[i] in active_names]
+        avg_progress = self.progress_buf#.float().mean().item()
+        if avg_progress >= self.phases[self.current_phase]["trigger_thresh"]:
+            self.current_phase +=1
+        self.current_scales = self.phases[self.current_phase]["reward_scales"]
+        active_names = self.current_scales.keys()
+        self.current_functions = {self.reward_names[i]: f for i, f in enumerate(self.reward_functions) if self.reward_names[i] in active_names}
 
     def log_reward_info(self, episode_sums):
         if not self.enabled or not self.log_rewards:
