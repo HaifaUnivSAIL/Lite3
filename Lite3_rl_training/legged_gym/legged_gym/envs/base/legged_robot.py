@@ -1633,9 +1633,25 @@ class LeggedRobot(BaseTask):
 
         return normalized
 
+    def _reward_hind_leg_strech(self):
+        # Get z (height) positions of hind legs
+        hind_leg_heights = self.rigid_body_state[:, self.hind_feet_ids, 2]  # (N, num_hind_legs)
 
+        # Average height across both hind legs
+        mean_hind_height = torch.mean(hind_leg_heights, dim=-1)
 
+        # Encourage higher legs (standing tall)
+        height_reward = torch.sigmoid(10.0 * (mean_hind_height - 0.2))
+        # 0.2 = baseline crouch height, tune for your model
+        # 10.0 = sharpness of transition
 
+        # Contact forces in +z (standing support)
+        contact_forces_z = torch.clamp(self.contact_forces[:, self.hind_feet_ids, 2], min=0.0)
+        mean_contact = torch.mean(contact_forces_z, dim=-1)
+        contact_reward = torch.sigmoid(mean_contact * 5.0)
+
+        # Combine: high reward if hind feet are tall *and* supporting
+        return height_reward * contact_reward
 
     def _reward_front_legs_up(self):
         contacts = self.contact_filt  # shape [N, 4]

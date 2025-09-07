@@ -108,8 +108,9 @@ class TwoLegStandCfg(LeggedRobotCfg):
                     "reward_scales": {
                         "base_height": -0.5,
                         "hind_leg_extension_geom": 4.0,
+                        "front_legs_up": 1.0,
+                        "torso_upright": 3.0,
                         "termination": -10.0,
-                        "stand_still": 1.0
                     }
                 },
                 {
@@ -128,11 +129,9 @@ class TwoLegStandCfg(LeggedRobotCfg):
                     "name": "phase_2_fine_standing",
                     "trigger_thresh": np.inf,
                     "reward_scales": {
-                        "base_height": -0.5,
-                        "hind_leg_extension_geom": 4.0,
+                        "hind_leg_strech": 4.0,
                         "front_legs_up": 1.0,
                         "torso_upright": 3.0,
-                        "foot_stillness": 1.0,
                         "termination": -10.0,
                         "stand_still": 1.0
                     }
