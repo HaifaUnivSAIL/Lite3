@@ -1633,7 +1633,7 @@ class LeggedRobot(BaseTask):
 
         return normalized
 
-    def _reward_hind_leg_strech(self):
+    def _reward_hind_leg_stretch(self):
         # Get z (height) positions of hind legs
         hind_leg_heights = self.rigid_body_state[:, self.hind_feet_ids, 2]  # (N, num_hind_legs)
 
