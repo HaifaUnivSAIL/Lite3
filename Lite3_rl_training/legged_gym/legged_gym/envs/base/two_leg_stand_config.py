@@ -162,7 +162,7 @@ class TwoLegStandCfg(LeggedRobotCfg):
         fixed_commands = [0.0, 0.0, 0.0]
         resampling_time = 6
 
-        class ranges:
+        class ranges(LeggedRobotCfg.commands.ranges):
             lin_vel_x = [-1.0, 1.0]
             lin_vel_y = [-1.0, 1.0]
             ang_vel_yaw = [-1.0, 1.0]
