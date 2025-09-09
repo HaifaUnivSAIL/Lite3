@@ -176,6 +176,12 @@ class OnPolicyRunner:
         self.tot_time += locs['collection_time'] + locs['learn_time']
         iteration_time = locs['collection_time'] + locs['learn_time']
 
+        # Get curriculum phase (adjust attribute name as needed)
+        try:
+            curriculum_phase = self.env.env.curriculum_controller.current_phase
+        except AttributeError:
+            curriculum_phase = "N/A"
+
         ep_string = f''
         if locs['ep_infos']:
             if self.save_rewards is True and self.csv_header is None:
@@ -230,6 +236,7 @@ class OnPolicyRunner:
         if len(locs['rewbuffer']) > 0:
             log_string = (f"""{'#' * width}\n"""
                           f"""{str.center(width, ' ')}\n\n"""
+                          f"""{'Curriculum phase:':>{pad}} {curriculum_phase}\n"""  # <-- Add this line
                           f"""{'Computation:':>{pad}} {fps:.0f} steps/s (collection: {locs[
                             'collection_time']:.3f}s, learning {locs['learn_time']:.3f}s)\n"""
                           f"""{'Value function loss:':>{pad}} {locs['mean_value_loss']:.4f}\n"""
@@ -237,18 +244,15 @@ class OnPolicyRunner:
                           f"""{'Mean action noise std:':>{pad}} {mean_std.item():.2f}\n"""
                           f"""{'Mean reward:':>{pad}} {statistics.mean(locs['rewbuffer']):.2f}\n"""
                           f"""{'Mean episode length:':>{pad}} {statistics.mean(locs['lenbuffer']):.2f}\n""")
-            #   f"""{'Mean reward/step:':>{pad}} {locs['mean_reward']:.2f}\n"""
-            #   f"""{'Mean episode length/episode:':>{pad}} {locs['mean_trajectory_length']:.2f}\n""")
         else:
             log_string = (f"""{'#' * width}\n"""
                           f"""{str.center(width, ' ')}\n\n"""
+                          f"""{'Curriculum phase:':>{pad}} {curriculum_phase}\n"""  # <-- Add this line
                           f"""{'Computation:':>{pad}} {fps:.0f} steps/s (collection: {locs[
                             'collection_time']:.3f}s, learning {locs['learn_time']:.3f}s)\n"""
                           f"""{'Value function loss:':>{pad}} {locs['mean_value_loss']:.4f}\n"""
                           f"""{'Surrogate loss:':>{pad}} {locs['mean_surrogate_loss']:.4f}\n"""
                           f"""{'Mean action noise std:':>{pad}} {mean_std.item():.2f}\n""")
-            #   f"""{'Mean reward/step:':>{pad}} {locs['mean_reward']:.2f}\n"""
-            #   f"""{'Mean episode length/episode:':>{pad}} {locs['mean_trajectory_length']:.2f}\n""")
 
         log_string += ep_string
         log_string += (f"""{'-' * width}\n"""
