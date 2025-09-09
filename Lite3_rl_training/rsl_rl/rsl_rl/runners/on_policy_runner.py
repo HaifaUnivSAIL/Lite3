@@ -176,11 +176,13 @@ class OnPolicyRunner:
         self.tot_time += locs['collection_time'] + locs['learn_time']
         iteration_time = locs['collection_time'] + locs['learn_time']
 
-        # Get curriculum phase (adjust attribute name as needed)
+        # Get curriculum phase name
         try:
-            curriculum_phase = self.env.env.curriculum_controller.current_phase
-        except AttributeError:
-            curriculum_phase = "N/A"
+            cc = self.env.env.curriculum_controller
+            phase_idx = cc.current_phase
+            phase_name = cc.phases[phase_idx]["name"]
+        except Exception:
+            phase_name = "N/A"
 
         ep_string = f''
         if locs['ep_infos']:
@@ -236,7 +238,7 @@ class OnPolicyRunner:
         if len(locs['rewbuffer']) > 0:
             log_string = (f"""{'#' * width}\n"""
                           f"""{str.center(width, ' ')}\n\n"""
-                          f"""{'Curriculum phase:':>{pad}} {curriculum_phase}\n"""  # <-- Add this line
+                          f"""{'Curriculum phase:':>{pad}} {phase_name}\n"""  # <-- Now prints phase name
                           f"""{'Computation:':>{pad}} {fps:.0f} steps/s (collection: {locs[
                             'collection_time']:.3f}s, learning {locs['learn_time']:.3f}s)\n"""
                           f"""{'Value function loss:':>{pad}} {locs['mean_value_loss']:.4f}\n"""
@@ -247,7 +249,7 @@ class OnPolicyRunner:
         else:
             log_string = (f"""{'#' * width}\n"""
                           f"""{str.center(width, ' ')}\n\n"""
-                          f"""{'Curriculum phase:':>{pad}} {curriculum_phase}\n"""  # <-- Add this line
+                          f"""{'Curriculum phase:':>{pad}} {phase_name}\n"""  # <-- Now prints phase name
                           f"""{'Computation:':>{pad}} {fps:.0f} steps/s (collection: {locs[
                             'collection_time']:.3f}s, learning {locs['learn_time']:.3f}s)\n"""
                           f"""{'Value function loss:':>{pad}} {locs['mean_value_loss']:.4f}\n"""
