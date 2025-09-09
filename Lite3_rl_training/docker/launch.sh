@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# HOST_DIR=~/lite3_project/Lite3_rl_training
+# HOST_DIR=~/Lite3/Lite3_rl_training
 
 # # Allow container to open GUI on host display
 # xhost +local:root > /dev/null
