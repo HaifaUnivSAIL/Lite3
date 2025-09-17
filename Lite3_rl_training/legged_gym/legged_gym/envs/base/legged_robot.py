@@ -1657,7 +1657,7 @@ class LeggedRobot(BaseTask):
         contacts = self.contact_filt  # shape [N, 4]
         fl = contacts[:, 0]
         fr = contacts[:, 1]
-        return 1.0 - (fl + fr).float()  # 1 if both off, 0 if either touching
+        return 1.0 - (fl + fr).clamp(0, 1)  # 1 if both off, 0 if either touching
 
     def _reward_foot_stillness(self):
         foot_velocities = self.root_states[:, 7:10]  # or use proper frame transform

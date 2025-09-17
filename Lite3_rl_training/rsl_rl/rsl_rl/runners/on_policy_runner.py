@@ -86,6 +86,7 @@ class OnPolicyRunner:
                                         load_run=self.cfg['load_run'],
                                         checkpoint=self.cfg['checkpoint'])  # last one
             print(f"Loading model from: {resume_path}")
+            print(resume_path)
             self.load(resume_path)
             
         if enable_summary_writer:
@@ -152,9 +153,16 @@ class OnPolicyRunner:
                 self.log(locals())
             if self.save_interval != -1 and it % self.save_interval == 0:
                 self.save(os.path.join(self.log_dir, 'model_{}.pt'.format(it)))
+                # Save TorchScript version for ONNX export
+                scripted = torch.jit.script(self.alg.actor_critic.export_policy())
+                
+                scripted.save(os.path.join(self.exported_path, 'model_{}.pt'.format(it)))
             if rewbuffer and statistics.mean(rewbuffer) > best_reward:
                 best_reward = statistics.mean(rewbuffer)
                 self.save(os.path.join(self.log_dir, 'model_best.pt'.format(it)))
+                # Save TorchScript version for ONNX export
+                scripted = torch.jit.script(self.alg.actor_critic.export_policy())
+                scripted.save(os.path.join(self.exported_path, 'model_best.pt'))
             ep_infos.clear()
 
             self.env.curriculum_factor = pow(self.env.curriculum_factor, self.env.cfg.env.convergence_rate)
@@ -166,6 +174,9 @@ class OnPolicyRunner:
 
         self.current_learning_iteration += num_learning_iterations
         self.save(os.path.join(self.log_dir, 'model_{}.pt'.format(self.current_learning_iteration)))
+        # Save TorchScript version for ONNX export
+        scripted = torch.jit.script(self.alg.actor_critic.export_policy())
+        scripted.save(os.path.join(self.exported_path, 'model_{}.pt'.format(self.current_learning_iteration)))
 
         if self.save_rewards is True:
             from legged_gym.scripts.plot_reward import save_reward_csv
@@ -191,6 +202,8 @@ class OnPolicyRunner:
                 with open(os.path.join(self.log_dir, 'rewards.csv'), 'w', newline='') as f:
                     writer = csv.writer(f)
                     writer.writerow(self.csv_header)
+                    self.exported_path = os.path.join(self.log_dir, 'exported')
+                    os.mkdir(self.exported_path)
             reward_row = []
             for key in locs['ep_infos'][0]:  # each reward terms
                 infotensor = torch.tensor([], device=self.device)

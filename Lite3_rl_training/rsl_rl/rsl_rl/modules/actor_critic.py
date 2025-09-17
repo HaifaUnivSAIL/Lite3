@@ -339,6 +339,21 @@ class ActorCritic(nn.Module):
         value = self.critic(torch.cat((critic_observations, latent), dim=-1))
         return value
 
+    def export_policy(self):
+        # TorchScript/ONNX-compatible wrapper for inference
+        class PolicyWrapper(nn.Module):
+            def __init__(self, actor, adaptation_module):
+                super().__init__()
+                self.actor = actor
+                self.adaptation_module = adaptation_module
+
+            def forward(self, observations, observation_history):
+                latent = self.adaptation_module(observation_history)
+                actions_mean = self.actor(torch.cat((observations, latent), dim=-1))
+                return actions_mean
+
+        return PolicyWrapper(self.actor, self.adaptation_module)
+
 
 def get_activation(act_name):
     if act_name == "elu":

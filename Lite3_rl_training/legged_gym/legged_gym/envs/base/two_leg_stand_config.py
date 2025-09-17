@@ -44,7 +44,7 @@ class TwoLegStandCfg(LeggedRobotCfg):
 
     class rewards(LeggedRobotCfg.rewards):
         soft_dof_pos_limit = 0.9
-        base_height_target = 0.36
+        base_height_target = 1
         still_all = True
         only_positive_rewards = True
         pitch_roll_factor = [1.0, 1.0]  # still used by orientation reward
@@ -104,32 +104,29 @@ class TwoLegStandCfg(LeggedRobotCfg):
             phases = [
                 {
                     "name": "phase_0_basic_balance",
-                    "trigger_thresh": 1000,
+                    "trigger_thresh": 500,
                     "reward_scales": {
-                        "base_height": -0.5,
-                        "hind_leg_extension_geom": 4.0,
-                        "front_legs_up": 1.0,
-                        "torso_upright": 3.0,
+                        "front_legs_up": 4.0,
+                        "torso_upright": 4.0,
                         "termination": -10.0,
                     }
                 },
                 {
                     "name": "phase_1_posture_alignment",
-                    "trigger_thresh": 3000,
+                    "trigger_thresh": 1000,
                     "reward_scales": {
-                        "base_height": -0.5,
+                        "base_height": -1,
                         "hind_leg_extension_geom": 4.0,
                         "front_legs_up": 1.0,
-                        "torso_upright": 3.0,
+                        # "torso_upright": 10.0,
                         "termination": -10.0,
-                        "stand_still": 1.0
                     }
                 },
                 {
                     "name": "phase_2_fine_standing",
                     "trigger_thresh": np.inf,
                     "reward_scales": {
-                        "hind_leg_stretch": 4.0,
+                        # "hind_leg_stretch": 4.0,
                         "front_legs_up": 1.0,
                         "torso_upright": 3.0,
                         "termination": -10.0,
