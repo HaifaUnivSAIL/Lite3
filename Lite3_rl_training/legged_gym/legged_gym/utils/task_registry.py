@@ -184,3 +184,13 @@ class TaskRegistry():
 
 # make global task registry
 task_registry = TaskRegistry()
+
+from legged_gym.envs.base.two_leg_stand_config import TwoLegStandCfg, TwoLegStandCfgPPO
+from legged_gym.envs.base.legged_robot import LeggedRobot
+
+task_registry.register(
+    name='two_leg_stand',
+    task_class=LeggedRobot,
+    env_cfg=TwoLegStandCfg(),
+    train_cfg=TwoLegStandCfgPPO()
+)

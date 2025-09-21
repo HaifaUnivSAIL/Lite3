@@ -86,6 +86,7 @@ class OnPolicyRunner:
                                         load_run=self.cfg['load_run'],
                                         checkpoint=self.cfg['checkpoint'])  # last one
             print(f"Loading model from: {resume_path}")
+            print(resume_path)
             self.load(resume_path)
             
         if enable_summary_writer:
@@ -118,6 +119,7 @@ class OnPolicyRunner:
             with torch.inference_mode():
                 for i in range(self.num_steps_per_env):
                     actions = self.alg.act(obs, privileged_obs, obs_history)
+                    self.env.env.curriculum_controller.get_progress_buf(buf_element=it)
                     obs_dict, rewards, dones, infos = self.env.step(actions)
                     obs, privileged_obs, obs_history = obs_dict["obs"], obs_dict["privileged_obs"], obs_dict[
                         "obs_history"]
@@ -151,9 +153,16 @@ class OnPolicyRunner:
                 self.log(locals())
             if self.save_interval != -1 and it % self.save_interval == 0:
                 self.save(os.path.join(self.log_dir, 'model_{}.pt'.format(it)))
+                # Save TorchScript version for ONNX export
+                scripted = torch.jit.script(self.alg.actor_critic.export_policy())
+                
+                scripted.save(os.path.join(self.exported_path, 'model_{}.pt'.format(it)))
             if rewbuffer and statistics.mean(rewbuffer) > best_reward:
                 best_reward = statistics.mean(rewbuffer)
                 self.save(os.path.join(self.log_dir, 'model_best.pt'.format(it)))
+                # Save TorchScript version for ONNX export
+                scripted = torch.jit.script(self.alg.actor_critic.export_policy())
+                scripted.save(os.path.join(self.exported_path, 'model_best.pt'))
             ep_infos.clear()
 
             self.env.curriculum_factor = pow(self.env.curriculum_factor, self.env.cfg.env.convergence_rate)
@@ -165,6 +174,9 @@ class OnPolicyRunner:
 
         self.current_learning_iteration += num_learning_iterations
         self.save(os.path.join(self.log_dir, 'model_{}.pt'.format(self.current_learning_iteration)))
+        # Save TorchScript version for ONNX export
+        scripted = torch.jit.script(self.alg.actor_critic.export_policy())
+        scripted.save(os.path.join(self.exported_path, 'model_{}.pt'.format(self.current_learning_iteration)))
 
         if self.save_rewards is True:
             from legged_gym.scripts.plot_reward import save_reward_csv
@@ -175,6 +187,14 @@ class OnPolicyRunner:
         self.tot_time += locs['collection_time'] + locs['learn_time']
         iteration_time = locs['collection_time'] + locs['learn_time']
 
+        # Get curriculum phase name
+        try:
+            cc = self.env.env.curriculum_controller
+            phase_idx = cc.current_phase
+            phase_name = cc.phases[phase_idx]["name"]
+        except Exception:
+            phase_name = "N/A"
+
         ep_string = f''
         if locs['ep_infos']:
             if self.save_rewards is True and self.csv_header is None:
@@ -182,6 +202,8 @@ class OnPolicyRunner:
                 with open(os.path.join(self.log_dir, 'rewards.csv'), 'w', newline='') as f:
                     writer = csv.writer(f)
                     writer.writerow(self.csv_header)
+                    self.exported_path = os.path.join(self.log_dir, 'exported')
+                    os.mkdir(self.exported_path)
             reward_row = []
             for key in locs['ep_infos'][0]:  # each reward terms
                 infotensor = torch.tensor([], device=self.device)
@@ -229,6 +251,7 @@ class OnPolicyRunner:
         if len(locs['rewbuffer']) > 0:
             log_string = (f"""{'#' * width}\n"""
                           f"""{str.center(width, ' ')}\n\n"""
+                          f"""{'Curriculum phase:':>{pad}} {phase_name}\n"""  # <-- Now prints phase name
                           f"""{'Computation:':>{pad}} {fps:.0f} steps/s (collection: {locs[
                             'collection_time']:.3f}s, learning {locs['learn_time']:.3f}s)\n"""
                           f"""{'Value function loss:':>{pad}} {locs['mean_value_loss']:.4f}\n"""
@@ -236,18 +259,15 @@ class OnPolicyRunner:
                           f"""{'Mean action noise std:':>{pad}} {mean_std.item():.2f}\n"""
                           f"""{'Mean reward:':>{pad}} {statistics.mean(locs['rewbuffer']):.2f}\n"""
                           f"""{'Mean episode length:':>{pad}} {statistics.mean(locs['lenbuffer']):.2f}\n""")
-            #   f"""{'Mean reward/step:':>{pad}} {locs['mean_reward']:.2f}\n"""
-            #   f"""{'Mean episode length/episode:':>{pad}} {locs['mean_trajectory_length']:.2f}\n""")
         else:
             log_string = (f"""{'#' * width}\n"""
                           f"""{str.center(width, ' ')}\n\n"""
+                          f"""{'Curriculum phase:':>{pad}} {phase_name}\n"""  # <-- Now prints phase name
                           f"""{'Computation:':>{pad}} {fps:.0f} steps/s (collection: {locs[
                             'collection_time']:.3f}s, learning {locs['learn_time']:.3f}s)\n"""
                           f"""{'Value function loss:':>{pad}} {locs['mean_value_loss']:.4f}\n"""
                           f"""{'Surrogate loss:':>{pad}} {locs['mean_surrogate_loss']:.4f}\n"""
                           f"""{'Mean action noise std:':>{pad}} {mean_std.item():.2f}\n""")
-            #   f"""{'Mean reward/step:':>{pad}} {locs['mean_reward']:.2f}\n"""
-            #   f"""{'Mean episode length/episode:':>{pad}} {locs['mean_trajectory_length']:.2f}\n""")
 
         log_string += ep_string
         log_string += (f"""{'-' * width}\n"""

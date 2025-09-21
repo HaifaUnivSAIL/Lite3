@@ -1,4 +1,4 @@
-# Dockerfile (unchanged since it was working)
+# Dockerfile
 FROM ubuntu:20.04
 ENV DEBIAN_FRONTEND=noninteractive
 
@@ -9,6 +9,7 @@ RUN apt-get update && apt-get install -y \
     libusb-1.0-0-dev libturbojpeg \
     libopencv-dev python3-opencv \
     libboost-all-dev libeigen3-dev \
+    vulkan-tools \
     && rm -rf /var/lib/apt/lists/*
 
 RUN python3.8 -m venv /venv

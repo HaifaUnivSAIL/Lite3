@@ -195,5 +195,11 @@ def register(task_name, task_registry):
         from legged_gym.envs.base.legged_robot import LeggedRobot
         from legged_gym.envs.lite3.lite3_config import Lite3RoughCfg, Lite3RoughCfgPPO
         task_registry.register("lite3", LeggedRobot, Lite3RoughCfg(), Lite3RoughCfgPPO())
+
+    elif task_name == 'lite3_two_leg_stand':
+        from legged_gym.envs.base.legged_robot import LeggedRobot
+        from legged_gym.envs.base.two_leg_stand_config import TwoLegStandCfg, TwoLegStandCfgPPO
+        task_registry.register("lite3_two_leg_stand", LeggedRobot, TwoLegStandCfg(), TwoLegStandCfgPPO())
+
     else:
         raise Exception("no such task_name")

@@ -49,6 +49,7 @@ from legged_gym.utils.torch_math import quat_apply_yaw, wrap_to_pi
 from legged_gym.utils.helpers import class_to_dict
 from .legged_robot_config import LeggedRobotCfg
 import matplotlib
+from legged_gym.utils.curriculum_controller import CurriculumController
 
 matplotlib.use('Agg')
 
@@ -87,10 +88,29 @@ class LeggedRobot(BaseTask):
 
         self.fixed_commands = self.cfg.commands.fixed_commands
         self.curriculum_factor = self.cfg.env.curriculum_factor
+        # -----------------------------------New curriculum controller for general strategies------------------------------#
+        self.curriculum_controller = CurriculumController(self.cfg, self.reward_functions, self.reward_names)
+        # ----------------------------------------------------------------------------------------------------------------- #
         self.height_noise_mean = 0.
 
         # load actuator network
         self.actuator_net = None
+        # printing some states of the robot to hardcode indices later in methods. (debug only)
+        if hasattr(self, "dof_names") and isinstance(self.dof_names, list):
+            print("DOF names and indices:")
+            for i, name in enumerate(self.dof_names):
+                print(f"{i}: {name}")
+        else:
+            print("DOF names not available at this point.")
+        if hasattr(self, "rigid_body_state"):
+            print("Rigid body state shape:", self.rigid_body_state.shape)
+            print("Rigid body positions:")
+            for i in range(self.rigid_body_state.shape[1]):
+                pos = self.rigid_body_state[0, i, :3]  # position of the first environment, i-th rigid body
+                print(f"{i}: Position = {pos}")
+        else:
+            print("Rigid body state not available.")
+
 
     def clock(self):
         return self.gym.get_sim_time(self.sim)
@@ -298,19 +318,60 @@ class LeggedRobot(BaseTask):
         if self.cfg.env.send_timeouts:
             self.extras["time_outs"] = self.time_out_buf
 
+    ### ------------------------------------------THIS IS THE CURRICULUM COMPUTE REWARD FUNCTION ------------------------------------------###
+    # def compute_reward_curriculum(self):
+    #     """Compute rewards with curriculum support"""
+    #     self.rew_buf[:] = 0.
+    #     ## TODO - Here the update is done into the curriculum controller object, integrate the iteration number into it instead of progress_buff ##
+    #     self.curriculum_controller.update(self.progress_buf)
+    #     ## **Note - fetching attributes from curriculum controller object to env object - this is similar to using env object attr - they are sent in constructor to curr object.
+    #     reward_scales = self.curriculum_controller.get_current_scales()
+    #     reward_funcs = self.curriculum_controller.get_current_functions()
+    #     reward_names = list(reward_scales.keys())
+    #     ## TODO - test that the reward names and scales are correct according to cfg file (two_leg_stand_config.py) and phase number (curriculum_controller state)
+    #     for i, name in enumerate(reward_names):
+    #         rew = reward_funcs[i]() * reward_scales[name]
+    #         self.rew_buf += rew
+    #         self.episode_sums[name] += rew
+    #
+    #     if self.cfg.rewards.only_positive_rewards:
+    #         self.rew_buf[:] = torch.clip(self.rew_buf[:], min=0.)
+    #
+    #     if "termination" in self.reward_scales:
+    #         rew = self._reward_termination() * self.reward_scales["termination"]
+    #         self.rew_buf += rew
+    #         self.episode_sums["termination"] += rew
+    #
+    #     if self.use_curriculum and self.curriculum_controller.log_rewards:
+    #         self.curriculum_controller.log_reward_info(self.episode_sums)
+    ### ---------------------------------------------------------------------------------------------------------------------------------###
+
+    ### ------------------------------------------THIS IS THE ORIGINAL COMPUTE REWARD FUNCTION ------------------------------------------###
+    ## TODO - make sure the new compute_reward function (above) is correct in logic (compare to the original below) regarding the scale uses and reward function uses.
     def compute_reward(self):
         """ Compute rewards
             Calls each reward function which had a non-zero scale (processed in self._prepare_reward_function())
             adds each terms to the episode sums and to the total reward
         """
         self.rew_buf[:] = 0.
-        for i in range(len(self.reward_functions)):
-            name = self.reward_names[i]
-            # rew = self.reward_functions[i]() * self.reward_scales[name]
-            rew = self.reward_functions[i]() * self.reward_scales[
-                name]  #* self.curriculum_factor
-            self.rew_buf += rew
-            self.episode_sums[name] += rew
+        if self.curriculum_controller.enabled is True:
+            ## TODO - Here the update is done into the curriculum controller object, integrate the iteration number into it instead of progress_buff ##
+
+            self.curriculum_controller.update()
+            ## **Note - fetching attributes from curriculum controller object to env object - this is similar to using env object attr - they are sent in constructor to curr object.
+            ## TODO - test that the reward names and scales are correct according to cfg file (two_leg_stand_config.py) and phase number (curriculum_controller state)
+            for name, reward_function in self.curriculum_controller.current_functions.items():
+                rew = reward_function() * self.curriculum_controller.current_scales[name]
+                self.rew_buf += rew
+                self.episode_sums[name] += rew
+        else:
+            for i in range(len(self.reward_functions)):
+                name = self.reward_names[i]
+                # rew = self.reward_functions[i]() * self.reward_scales[name]
+                rew = self.reward_functions[i]() * self.reward_scales[
+                    name]  #* self.curriculum_factor
+                self.rew_buf += rew
+                self.episode_sums[name] += rew
         if self.cfg.rewards.only_positive_rewards:
             self.rew_buf[:] = torch.clip(self.rew_buf[:], min=0.)
         # add termination reward after clipping
@@ -1506,6 +1567,7 @@ class LeggedRobot(BaseTask):
 
     def _reward_stand_still(self):
         # Penalize motion at zero commands
+        # print(f"%%%%%%%%%%%%%%%%%%%%%%% stand still function is called. All scales are named including the new ones.")
         if not self.cfg.rewards.still_all:
             return torch.sum(torch.abs(self.dof_pos[:, self.penalize_joint_ids] \
                                     - self.default_dof_pos[:, self.penalize_joint_ids]), dim=1) \
@@ -1515,6 +1577,92 @@ class LeggedRobot(BaseTask):
                                             self.default_dof_pos[:, self.penalize_joint_ids]), \
                                         dim=1)
             return abad_joint_reward
+        
+    def _reward_torso_upright(self):
+        """
+        Rewards the robot for aligning its torso X-axis (forward direction)
+        with the world Z-axis (upward).
+        This is equivalent to encouraging a rotation of +90 degrees around Y,
+        i.e., quaternion [0, 0.7071, 0, 0.7071].
+        """
+        # The projected_gravity is the gravity vector expressed in the base frame
+        # So aligning the X-axis with world Z means gravity should point along -X
+        # i.e., projected_gravity[:, 0] should be close to -1.0
+
+        alignment = -self.projected_gravity[:, 0]  # Want this to be +1.0 when upright
+        reward = alignment.clamp(min=0.0)  # Only positive alignment is rewarded
+        # print(f"%%%%%%%%%%%%%%%%%%%%%%% torso upright function is called. All scales are named including the new ones.")
+        return reward
+
+    def _reward_hind_knee_extension(self):
+        """Reward robot for extending hind knees (e.g., promoting standing posture)."""
+        # Pick joint indices
+        hl_knee_idx = 8
+        hr_knee_idx = 11
+        # Extract the angles
+        hl_angle = self.dof_pos[:, hl_knee_idx]
+        hr_angle = self.dof_pos[:, hr_knee_idx]
+        # print(f"%%%%%%%%%%%%%%%%%%%%%%% extension function is called. All scales are named including the new ones. hl_angle={hl_angle}, hr_angle={hr_angle}")
+        # Normalize to 0–1 based on limits if needed; for now assume higher is better
+        reward = hl_angle + hr_angle  # encourages larger angles directly
+
+        return reward
+    
+    def _reward_hind_leg_extension_geom(self):
+        # Indices based on your printout
+        hl_hip_idx = 9
+        hl_foot_idx = 12
+        hr_hip_idx = 13
+        hr_foot_idx = 16
+
+        # Get 3D positions
+        hl_hip_pos = self.rigid_body_state[:, hl_hip_idx, :3]
+        hl_foot_pos = self.rigid_body_state[:, hl_foot_idx, :3]
+        hr_hip_pos = self.rigid_body_state[:, hr_hip_idx, :3]
+        hr_foot_pos = self.rigid_body_state[:, hr_foot_idx, :3]
+
+        # Compute lengths
+        hl_leg_length = torch.norm(hl_foot_pos - hl_hip_pos, dim=1)
+        hr_leg_length = torch.norm(hr_foot_pos - hr_hip_pos, dim=1)
+
+        # Combine and normalize
+        leg_length = (hl_leg_length + hr_leg_length) / 2.0
+
+        # Normalize based on max leg length (e.g. ~0.4m, adjust if known)
+        normalized = torch.clamp(leg_length / 0.4, 0.0, 1.0)
+
+        return normalized
+
+    def _reward_hind_leg_stretch(self):
+        # Get z (height) positions of hind legs
+        hind_leg_heights = self.rigid_body_state[:, self.hind_feet_ids, 2]  # (N, num_hind_legs)
+
+        # Average height across both hind legs
+        mean_hind_height = torch.mean(hind_leg_heights, dim=-1)
+
+        # Encourage higher legs (standing tall)
+        height_reward = torch.sigmoid(10.0 * (mean_hind_height - 0.2))
+        # 0.2 = baseline crouch height, tune for your model
+        # 10.0 = sharpness of transition
+
+        # Contact forces in +z (standing support)
+        contact_forces_z = torch.clamp(self.contact_forces[:, self.hind_feet_ids, 2], min=0.0)
+        mean_contact = torch.mean(contact_forces_z, dim=-1)
+        contact_reward = torch.sigmoid(mean_contact * 5.0)
+
+        # Combine: high reward if hind feet are tall *and* supporting
+        return height_reward * contact_reward
+
+    def _reward_front_legs_up(self):
+        contacts = self.contact_filt  # shape [N, 4]
+        fl = contacts[:, 0]
+        fr = contacts[:, 1]
+        return 1.0 - (fl + fr).clamp(0, 1)  # 1 if both off, 0 if either touching
+
+    def _reward_foot_stillness(self):
+        foot_velocities = self.root_states[:, 7:10]  # or use proper frame transform
+        speed = torch.norm(foot_velocities, dim=1)
+        return torch.clamp(1.0 - speed / 1.0, min=0.0)
 
     # def _reward_feet_height(self):
     #     # Penalize feet height error
