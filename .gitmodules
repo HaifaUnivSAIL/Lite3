@@ -1,0 +1,3 @@
+[submodule "Lite3_rl_deploy"]
+	path = Lite3_rl_deploy
+	url = git@github.com:HaifaUnivSAIL/Lite3_rl_deploy.git
