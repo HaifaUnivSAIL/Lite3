@@ -1,8 +1,0 @@
-prefix=/lite3_ws/install
-
-Name: message_transformer
-Description: Description of message_transformer
-Version: 1.0.0
-Cflags: -I${prefix}/include
-Libs: -L${prefix}/lib 
-Requires: roscpp rospy sensor_msgs std_msgs message_runtime tf

@@ -1,2 +1,0 @@
-message_transformer
--DCATKIN_DEVEL_PREFIX=/lite3_ws/devel -DCMAKE_INSTALL_PREFIX=/lite3_ws/install -G Unix Makefiles
