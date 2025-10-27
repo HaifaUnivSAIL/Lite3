@@ -5,7 +5,7 @@ class TwoLegStandCfg(LeggedRobotCfg):
 
     class init_state(LeggedRobotCfg.init_state):
         pos = [0.0, 0.0, 0.32]
-        rot = [0.9999929146412841, -0.00023085526184233324, -0.0032073138974974646, -0.0019571690372445424]
+        rot = [-0.00023085526184233324, -0.0032073138974974646, -0.0019571690372445424, 0.9999929146412841]
         default_joint_angles = {
             'FL_HipX_joint': -0.0154048,
             'FR_HipX_joint': 0.0159887,
