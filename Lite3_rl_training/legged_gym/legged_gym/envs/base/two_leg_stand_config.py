@@ -5,13 +5,20 @@ class TwoLegStandCfg(LeggedRobotCfg):
 
     class init_state(LeggedRobotCfg.init_state):
         pos = [0.0, 0.0, 0.32]
+        rot = [0.9999929146412841, -0.00023085526184233324, -0.0032073138974974646, -0.0019571690372445424]
         default_joint_angles = {
-            'FL_HipX_joint': 0.0, 'FR_HipX_joint': 0.0,
-            'HL_HipX_joint': 0.0, 'HR_HipX_joint': 0.0,
-            'FL_HipY_joint': -0.2, 'FR_HipY_joint': -0.2,  # lifted front
-            'FL_Knee_joint': 0.1, 'FR_Knee_joint': 0.1,
-            'HL_HipY_joint': -1.0, 'HR_HipY_joint': -1.0,
-            'HL_Knee_joint': 1.8, 'HR_Knee_joint': 1.8,
+            'FL_HipX_joint': -0.0154048,
+            'FR_HipX_joint': 0.0159887,
+            'HL_HipX_joint': -0.0221317,
+            'HR_HipX_joint': 0.0224431,
+            'FL_HipY_joint': -0.76697,
+            'FR_HipY_joint': -0.768286,
+            'FL_Knee_joint': 1.53761,
+            'FR_Knee_joint': 1.53636,
+            'HL_HipY_joint': -0.765865,
+            'HR_HipY_joint': -0.767203,
+            'HL_Knee_joint': 1.54788,
+            'HR_Knee_joint': 1.54679,
         }
 
     class env(LeggedRobotCfg.env):
