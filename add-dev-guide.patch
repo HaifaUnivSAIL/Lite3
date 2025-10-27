@@ -1,0 +1,71 @@
+diff --git a/README.md b/README.md
+index e69de29..abcd123 100644
+--- a/README.md
++++ b/README.md
+@@
++# Development Guide
++
++This repository uses **Git submodules** to include [Lite3_rl_deploy](https://github.com/HaifaUnivSAIL/Lite3_rl_deploy) as a dependency.  
++That means you can work on `Lite3_rl_training` and `Lite3_rl_deploy` side-by-side, but changes to `Lite3_rl_deploy` live in **your fork** (not the upstream repo).
++
++### Workflow: editing and pushing code
++
++1. **Enter the submodule**
++   ```bash
++   cd Lite3/Lite3_rl_deploy
++   ```
++
++2. **Check you’re on the right branch**
++   ```bash
++   git status
++   # should show: On branch main
++   ```
++
++3. **Make your code changes**  
++   Add new files, edit sources, etc.
++
++4. **Commit inside the submodule**
++   ```bash
++   git add -A
++   git commit -m "Describe your change here"
++   ```
++
++5. **Push to your fork**
++   ```bash
++   git push origin main
++   ```
++   > :information_source: `origin` is already set to your fork (`HaifaUnivSAIL/Lite3_rl_deploy`).
++
++6. **Pin the new submodule commit in the umbrella repo**
++   Go back to the top level of `Lite3`:
++   ```bash
++   cd ..
++   git add Lite3_rl_deploy
++   git commit -m "Update Lite3_rl_deploy submodule pointer"
++   git push
++   ```
++
++### How to sync later
++- To update the submodule from your fork:
++  ```bash
++  cd Lite3/Lite3_rl_deploy
++  git pull origin main
++  cd ..
++  git add Lite3_rl_deploy
++  git commit -m "Sync submodule to latest fork commit"
++  git push
++  ```
++
++### Notes
++- **Do not commit directly** to the upstream `DeepRoboticsLab/Lite3_rl_deploy`.  
++- If you want to fetch updates from upstream:
++  ```bash
++  cd Lite3/Lite3_rl_deploy
++  git fetch upstream
++  git merge upstream/main
++  git push origin main
++  ```
++- Always remember:  
++  - Submodule commits are tracked like pointers.  
++  - Both the submodule **and** the umbrella repo need a commit after changes.
++
