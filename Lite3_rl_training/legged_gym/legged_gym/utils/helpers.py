@@ -202,4 +202,4 @@ def register(task_name, task_registry):
         task_registry.register("lite3_two_leg_stand", LeggedRobot, TwoLegStandCfg(), TwoLegStandCfgPPO())
 
     else:
-        raise Exception("no such task_name")
+        raise Exception("no such task_name. Possible names are: lite3, lite3_two_leg_stand")

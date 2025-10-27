@@ -96,6 +96,17 @@ def play(args):
     for i in range(10 * int(env.max_episode_length)):
         with torch.no_grad():
             actions = policy(obs, obs_history)
+            # --- Debug export of obs/action for deployment comparison ---
+            if i < 10:
+                import numpy as np, os
+                os.makedirs("debug_training_obs", exist_ok=True)
+                np.savez(
+                    f"debug_training_obs/step_{i:02d}.npz",
+                    obs=obs.cpu().numpy(),
+                    obs_history=obs_history.cpu().numpy(),
+                    action=actions.cpu().numpy(),
+                )
+            # --- End debug export ---
             # print(actions[0])
         obs_dict, rews, dones, infos = env.step(actions)
         obs, privileged_obs, obs_history = obs_dict["obs"], obs_dict["privileged_obs"], obs_dict["obs_history"]
