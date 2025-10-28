@@ -131,7 +131,6 @@ class TwoLegStandCfg(LeggedRobotCfg):
                     "reward_scales": {
                         "human_posture": 3.0,
                         "front_legs_up_continuous": 10.0,
-                        "torso_upright_soften": 1.0,
                         "torso_upright_continuous": 3.0,
                         "stand_still": 0.3,
                         "termination": -10.0,

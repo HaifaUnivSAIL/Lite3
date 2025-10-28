@@ -152,14 +152,14 @@ class OnPolicyRunner:
             if self.log_dir is not None:
                 self.log(locals())
             if self.save_interval != -1 and it % self.save_interval == 0:
-                self.save(os.path.join(self.log_dir, 'model_{}.pt'.format(it)))
+                self.save(os.path.join(self.log_dir, 'model_{}.pt'.format(it)), iteration=it)
                 # Save TorchScript version for ONNX export
                 scripted = torch.jit.script(self.alg.actor_critic.export_policy())
                 
                 scripted.save(os.path.join(self.exported_path, 'model_{}.pt'.format(it)))
             if rewbuffer and statistics.mean(rewbuffer) > best_reward:
                 best_reward = statistics.mean(rewbuffer)
-                self.save(os.path.join(self.log_dir, 'model_best.pt'.format(it)))
+                self.save(os.path.join(self.log_dir, 'model_best.pt'.format(it)), iteration=it)
                 # Save TorchScript version for ONNX export
                 scripted = torch.jit.script(self.alg.actor_critic.export_policy())
                 scripted.save(os.path.join(self.exported_path, 'model_best.pt'))
@@ -173,7 +173,8 @@ class OnPolicyRunner:
                 self.env.height_noise_mean = torch.distributions.uniform.Uniform(-0.03, 0.03).sample()
 
         self.current_learning_iteration += num_learning_iterations
-        self.save(os.path.join(self.log_dir, 'model_{}.pt'.format(self.current_learning_iteration)))
+        self.save(os.path.join(self.log_dir, 'model_{}.pt'.format(self.current_learning_iteration)),
+                  iteration=self.current_learning_iteration)
         # Save TorchScript version for ONNX export
         scripted = torch.jit.script(self.alg.actor_critic.export_policy())
         scripted.save(os.path.join(self.exported_path, 'model_{}.pt'.format(self.current_learning_iteration)))
@@ -279,12 +280,14 @@ class OnPolicyRunner:
                       )
         print(log_string)
 
-    def save(self, path, infos=None):
+    def save(self, path, infos=None, iteration=None):
+        if iteration is None:
+            iteration = self.current_learning_iteration
         torch.save(
             {
                 'model_state_dict': self.alg.actor_critic.state_dict(),
                 'optimizer_state_dict': self.alg.optimizer.state_dict(),
-                'iter': self.current_learning_iteration,
+                'iter': iteration,
                 'infos': infos,
             }, path)
 

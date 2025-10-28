@@ -82,7 +82,14 @@ def get_load_path(root, load_run='-1', checkpoint=-1):
     if load_run == '-1':
         load_run = last_run
     else:
-        load_run = os.path.join(root, load_run)
+        load_run = os.path.normpath(load_run)
+        # if user passed absolute path, keep it
+        if not os.path.isabs(load_run):
+            # strip duplicated leading folder (e.g., "two_leg_stand/Oct12...")
+            root_basename = os.path.basename(os.path.normpath(root))
+            if load_run.startswith(root_basename + os.sep):
+                load_run = load_run.split(os.sep, 1)[1]
+            load_run = os.path.join(root, load_run)
 
     if checkpoint == -1:
         models = filter(
