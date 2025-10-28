@@ -1681,6 +1681,40 @@ class LeggedRobot(BaseTask):
 
         return torso_upright * height_gate * contact_gate
 
+    def _reward_torso_upright_warmup(self):
+        """Early-stage upright reward with relaxed constraints."""
+        proj_g = self.projected_gravity
+        pitch_score = torch.clamp((-proj_g[:, 0] + 1.0) / 2.0, 0.0, 1.0)
+        roll_score = torch.clamp(1.0 - 0.5 * torch.abs(proj_g[:, 1]), 0.0, 1.0)
+        orientation_score = torch.pow(pitch_score * roll_score + 1e-5, 0.5)
+
+        base_height = self.root_states[:, 2]
+        height_gate = torch.clamp((base_height - 0.30) / 0.18, min=0.0, max=1.0)
+
+        front_contact = torch.any(self.contact_filt[:, :2], dim=1)
+        contact_gate = 1.0 - 0.25 * front_contact.to(self.dof_pos.dtype)
+
+        return orientation_score * height_gate * contact_gate
+
+    def _reward_torso_upright_continuous(self):
+        """Stricter upright reward that enforces stability while tall."""
+        base_reward = self._reward_torso_upright_soften()
+
+        if self.hind_feet_ids.numel() > 0:
+            hind_contacts = torch.all(self.contact_filt[:, self.hind_feet_ids], dim=1)
+            hind_support_gate = hind_contacts.to(self.dof_pos.dtype)
+        else:
+            hind_support_gate = torch.ones(self.num_envs, dtype=self.dof_pos.dtype, device=self.device)
+
+        torso_pitch_rate = torch.abs(self.base_ang_vel[:, 0])
+        torso_yaw_rate = torch.abs(self.base_ang_vel[:, 2])
+        rotation_gate = torch.exp(-1.5 * torso_yaw_rate - 0.8 * torso_pitch_rate)
+
+        body_lin_motion = torch.norm(self.base_lin_vel[:, :2], dim=1)
+        sway_gate = torch.exp(-1.0 * body_lin_motion)
+
+        return base_reward * hind_support_gate * rotation_gate * sway_gate
+
     def _reward_hind_knee_extension(self):
         """Reward robot for extending hind knees (e.g., promoting standing posture)."""
         # Pick joint indices
