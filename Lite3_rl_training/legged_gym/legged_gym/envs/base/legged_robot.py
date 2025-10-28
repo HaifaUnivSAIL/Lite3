@@ -91,6 +91,7 @@ class LeggedRobot(BaseTask):
         # -----------------------------------New curriculum controller for general strategies------------------------------#
         self.curriculum_controller = CurriculumController(self.cfg, self.reward_functions, self.reward_names)
         # ----------------------------------------------------------------------------------------------------------------- #
+        self.front_touch_termination_active = False
         self.height_noise_mean = 0.
 
         # load actuator network
@@ -208,6 +209,10 @@ class LeggedRobot(BaseTask):
         self.contact = self.contact_forces[:, self.feet_indices, 2] > 1.
         self.contact_filt = torch.logical_or(self.contact, self.last_contacts)
         self.last_contacts = self.contact
+        if self.front_air_time is not None:
+            front_contacts = self.contact_filt[:, self.front_feet_ids]
+            airborne = (~front_contacts).to(self.front_air_time.dtype)
+            self.front_air_time = (self.front_air_time + self.dt * airborne) * airborne
 
         self._post_physics_step_callback()
         # compute observations, rewards, resets, ...
@@ -240,6 +245,11 @@ class LeggedRobot(BaseTask):
         self.reset_buf = torch.any(torch.norm(self.contact_forces[:, self.termination_contact_indices, :], dim=-1) > 1., dim=1)
         self.reset_buf |= torch.logical_or(torch.abs(self.rpy[:, 1]) > 1.0, torch.abs(self.rpy[:, 0]) > 0.5)  # 60 degrees
         self.time_out_buf = self.episode_length_buf > self.max_episode_length  # no terminal reward for time-outs
+
+        if self.front_touch_termination_active and self.front_feet_ids.numel() > 0:
+            front_touch = torch.any(self.contact_filt[:, self.front_feet_ids], dim=1)
+            self.front_touch_violation |= front_touch
+            self.reset_buf |= front_touch
 
         # self.reset_buf <<= 1
         offset_from_env_origin = self.root_states[:, :3] - self.env_origins
@@ -298,15 +308,23 @@ class LeggedRobot(BaseTask):
         # self.last_actions[env_ids] = 0.
         # self.last_dof_vel[env_ids] = 0.
         self.feet_air_time[env_ids] = 0.
+        if self.front_air_time is not None:
+            self.front_air_time[env_ids] = 0.
         self.episode_length_buf[env_ids] = 0
         self.reset_buf[env_ids] = 1
 
         # fill extras
         self.extras["episode"] = {}
+        performance_metrics = {}
         for key in self.episode_sums.keys():
-            self.extras["episode"]['rew_' + key] = torch.mean(
-                self.episode_sums[key][env_ids]) / self.max_episode_length_s
+            mean_value = torch.mean(self.episode_sums[key][env_ids]) / self.max_episode_length_s
+            self.extras["episode"]['rew_' + key] = mean_value
+            performance_metrics[key] = float(mean_value.detach().cpu())
             self.episode_sums[key][env_ids] = 0.
+        if self.front_feet_ids.numel() > 0:
+            front_touch_rate = self.front_touch_violation[env_ids].float().mean()
+            self.extras["episode"]["front_touch"] = front_touch_rate
+            self.front_touch_violation[env_ids] = False
         # log additional curriculum info
         if self.cfg.terrain.curriculum:
             self.extras["episode"]["terrain_level"] = torch.mean(
@@ -317,6 +335,10 @@ class LeggedRobot(BaseTask):
         # send timeout info to the algorithm
         if self.cfg.env.send_timeouts:
             self.extras["time_outs"] = self.time_out_buf
+
+        if self.curriculum_controller.enabled:
+            self.curriculum_controller.update_performance(performance_metrics)
+            self.front_touch_termination_active = self.curriculum_controller.front_touch_active()
 
     ### ------------------------------------------THIS IS THE CURRICULUM COMPUTE REWARD FUNCTION ------------------------------------------###
     # def compute_reward_curriculum(self):
@@ -958,6 +980,18 @@ class LeggedRobot(BaseTask):
                                              dtype=torch.float,
                                              device=self.device,
                                              requires_grad=False)
+        self.front_touch_violation = torch.zeros(self.num_envs,
+                                                 dtype=torch.bool,
+                                                 device=self.device,
+                                                 requires_grad=False)
+        if self.front_feet_ids.numel() > 0:
+            self.front_air_time = torch.zeros(self.num_envs,
+                                              self.front_feet_ids.numel(),
+                                              dtype=torch.float,
+                                              device=self.device,
+                                              requires_grad=False)
+        else:
+            self.front_air_time = None
         self.last_dof_vel = torch.zeros_like(self.dof_vel)
         self.last_last_dof_vel = torch.zeros_like(self.dof_vel)
         self.last_root_vel = torch.zeros_like(self.root_states[:, 7:13])
@@ -1285,6 +1319,37 @@ class LeggedRobot(BaseTask):
         for i in range(len(feet_names)):
             self.feet_indices[i] = self.gym.find_actor_rigid_body_handle(self.envs[0], self.actor_handles[0], feet_names[i])
 
+        self.front_feet_ids = torch.empty(0, dtype=torch.long, device=self.device)
+        self.hind_feet_ids = torch.empty(0, dtype=torch.long, device=self.device)
+        self.hind_hip_body_ids = torch.empty(0, dtype=torch.long, device=self.device)
+        if hasattr(self.cfg, "rewards"):
+            name_map = {name: idx for idx, name in enumerate(feet_names)}
+            if hasattr(self.cfg.rewards, "front_legs"):
+                front_ids = []
+                for leg_prefix in self.cfg.rewards.front_legs:
+                    target = next((n for n in feet_names if leg_prefix in n), None)
+                    if target is not None:
+                        front_ids.append(name_map[target])
+                if front_ids:
+                    self.front_feet_ids = torch.tensor(front_ids, dtype=torch.long, device=self.device)
+            if hasattr(self.cfg.rewards, "rear_legs"):
+                hind_ids = []
+                for leg_prefix in self.cfg.rewards.rear_legs:
+                    target = next((n for n in feet_names if leg_prefix in n), None)
+                    if target is not None:
+                        hind_ids.append(name_map[target])
+                if hind_ids:
+                    self.hind_feet_ids = torch.tensor(hind_ids, dtype=torch.long, device=self.device)
+                hip_ids = []
+                for leg_prefix in self.cfg.rewards.rear_legs:
+                    search = f"{leg_prefix}_HIP"
+                    hip_name = next((n for n in body_names if search in n), None)
+                    if hip_name is not None:
+                        hip_handle = self.gym.find_actor_rigid_body_handle(self.envs[0], self.actor_handles[0], hip_name)
+                        hip_ids.append(hip_handle)
+                if hip_ids:
+                    self.hind_hip_body_ids = torch.tensor(hip_ids, dtype=torch.long, device=self.device)
+
         # self.shoulder_indices = torch.zeros(len(shoulder_names), dtype=torch.long, device=self.device, requires_grad=False)
         # for i in range(len(shoulder_names)):
         #     self.shoulder_indices[i] = self.gym.find_actor_rigid_body_handle(self.envs[0], self.actor_handles[0],
@@ -1573,10 +1638,13 @@ class LeggedRobot(BaseTask):
                                     - self.default_dof_pos[:, self.penalize_joint_ids]), dim=1) \
                              * (torch.norm(self.commands[:, :2], dim=1) < 0.1)
         else:
-            abad_joint_reward = torch.sum(torch.abs(self.dof_pos[:, self.penalize_joint_ids] - \
-                                            self.default_dof_pos[:, self.penalize_joint_ids]), \
-                                        dim=1)
-            return abad_joint_reward
+            joint_deviation = torch.mean(torch.abs(self.dof_pos[:, self.penalize_joint_ids] -
+                                                  self.default_dof_pos[:, self.penalize_joint_ids]), dim=1)
+            body_lin_motion = torch.norm(self.base_lin_vel[:, :2], dim=1)
+            body_ang_motion = torch.norm(self.base_ang_vel[:, [0, 2]], dim=1)
+
+            motion_metric = 1.5 * joint_deviation + 0.5 * body_lin_motion + 0.8 * body_ang_motion
+            return torch.exp(-motion_metric)
         
     def _reward_torso_upright(self):
         """
@@ -1592,7 +1660,26 @@ class LeggedRobot(BaseTask):
         alignment = -self.projected_gravity[:, 0]  # Want this to be +1.0 when upright
         reward = alignment.clamp(min=0.0)  # Only positive alignment is rewarded
         # print(f"%%%%%%%%%%%%%%%%%%%%%%% torso upright function is called. All scales are named including the new ones.")
+        # reward = torch.where(reward >= 0.5, reward, torch.zeros_like(reward))  # Threshold for reward
         return reward
+
+    def _reward_torso_upright_soften(self):
+        """Smooth upright reward that also considers roll and height."""
+        proj_g = self.projected_gravity
+        pitch_component = (-proj_g[:, 0] + 1.0) / 2.0
+        roll_component = 1.0 - torch.abs(proj_g[:, 1])
+        orientation_score = torch.clamp(pitch_component, 0.0, 1.0) * torch.clamp(roll_component, 0.0, 1.0)
+        orientation_score = torch.pow(orientation_score, 0.5)
+
+        torso_upright = torch.sigmoid(4.0 * (orientation_score - 0.3))
+
+        base_height = self.root_states[:, 2]
+        height_gate = torch.clamp((base_height - 0.32) / 0.15, min=0.0, max=1.0)
+
+        front_contact = torch.any(self.contact_filt[:, :2], dim=1)
+        contact_gate = 1.0 - 0.5 * front_contact.to(self.dof_pos.dtype)
+
+        return torso_upright * height_gate * contact_gate
 
     def _reward_hind_knee_extension(self):
         """Reward robot for extending hind knees (e.g., promoting standing posture)."""
@@ -1607,6 +1694,91 @@ class LeggedRobot(BaseTask):
         reward = hl_angle + hr_angle  # encourages larger angles directly
 
         return reward
+
+    def _reward_human_posture_warmup(self):
+        """Coarse reward to encourage hind-leg extension and torso elevation."""
+        hl_knee_idx = 8
+        hr_knee_idx = 11
+
+        knees = torch.stack((self.dof_pos[:, hl_knee_idx], self.dof_pos[:, hr_knee_idx]), dim=1)
+        knee_lower = self.dof_pos_limits[[hl_knee_idx, hr_knee_idx], 0]
+        knee_upper = self.dof_pos_limits[[hl_knee_idx, hr_knee_idx], 1]
+        knee_range = torch.clamp(knee_upper - knee_lower, min=1e-6)
+        knee_extension = 1.0 - torch.clamp((knees - knee_lower) / knee_range, 0.0, 1.0)
+        knee_score = torch.clamp((knee_extension.mean(dim=1) - 0.2) / 0.6, 0.0, 1.0)
+
+        if self.hind_hip_body_ids.numel() > 0:
+            hind_hip_heights = torch.mean(self.rigid_body_state[:, self.hind_hip_body_ids, 2], dim=1)
+        else:
+            hind_hip_heights = self.root_states[:, 2]
+        height_score = torch.clamp((hind_hip_heights - 0.30) / 0.12, min=0.0, max=1.0)
+
+        pitch = torch.abs(self.rpy[:, 1])
+        roll = torch.abs(self.rpy[:, 0])
+        orientation_gate = torch.exp(-(torch.square(pitch) + torch.square(roll)) / 0.25)
+
+        front_contact = torch.any(self.contact_filt[:, :2], dim=1)
+        contact_gate = 1.0 - 0.5 * front_contact.to(self.dof_pos.dtype)
+
+        if self.hind_feet_ids.numel() > 0:
+            hind_contacts = torch.all(self.contact_filt[:, self.hind_feet_ids], dim=1)
+            hind_support_gate = hind_contacts.to(self.dof_pos.dtype)
+        else:
+            hind_support_gate = torch.ones(self.num_envs, dtype=self.dof_pos.dtype, device=self.device)
+
+        rotation_gate = torch.exp(-1.5 * torch.square(self.base_ang_vel[:, 2]))
+
+        base_reward = 0.3 + 0.7 * knee_score * height_score
+        return base_reward * orientation_gate * contact_gate * hind_support_gate * rotation_gate
+
+    def _reward_human_posture(self):
+        """Encourage a human-like upright stance driven by hind-leg posture."""
+        hl_knee_idx = 8
+        hr_knee_idx = 11
+        hl_hip_idx = 7
+        hr_hip_idx = 10
+        knees = torch.stack((self.dof_pos[:, hl_knee_idx], self.dof_pos[:, hr_knee_idx]), dim=1)
+        knee_lower = self.dof_pos_limits[[hl_knee_idx, hr_knee_idx], 0]
+        knee_upper = self.dof_pos_limits[[hl_knee_idx, hr_knee_idx], 1]
+        knee_range = torch.clamp(knee_upper - knee_lower, min=1e-6)
+        knee_extension = 1.0 - torch.clamp((knees - knee_lower) / knee_range, 0.0, 1.0)
+
+        hip_targets = torch.tensor([-0.2, -0.2], device=self.device, dtype=self.dof_pos.dtype)
+        hips = torch.stack((self.dof_pos[:, hl_hip_idx], self.dof_pos[:, hr_hip_idx]), dim=1)
+        hip_alignment = torch.exp(-torch.square(hips - hip_targets) / 0.1)
+
+        joint_posture_reward = knee_extension.mean(dim=1) * hip_alignment.mean(dim=1)
+        combined_reward = 0.6 * joint_posture_reward + 0.4 * self._reward_hind_leg_extension_geom()
+
+        cheat_guard = self._human_posture_guard()
+        if self.hind_feet_ids.numel() > 0:
+            hind_contacts = torch.all(self.contact_filt[:, self.hind_feet_ids], dim=1)
+            hind_support_gate = hind_contacts.to(self.dof_pos.dtype)
+        else:
+            hind_support_gate = torch.ones(self.num_envs, dtype=self.dof_pos.dtype, device=self.device)
+
+        rotation_gate = torch.exp(-1.5 * torch.square(self.base_ang_vel[:, 2]))
+        return combined_reward * cheat_guard * hind_support_gate * rotation_gate
+
+    def _human_posture_guard(self):
+        """Gate posture rewards to prevent exploits such as front-leg support or large torso lean."""
+        front_contact = torch.any(self.contact_filt[:, :2], dim=1)
+        front_clear_gate = (~front_contact).to(self.dof_pos.dtype)
+
+        pitch = torch.abs(self.rpy[:, 1])
+        roll = torch.abs(self.rpy[:, 0])
+        orientation_gate = torch.exp(-(torch.square(pitch) + torch.square(roll)) / 0.1)
+
+        base_height = self.root_states[:, 2]
+        height_gate = torch.clamp((base_height - 0.35) / 0.2, min=0.0, max=1.0)
+
+        hl_knee_idx = 8
+        hr_knee_idx = 11
+        knee_vel = torch.stack((self.dof_vel[:, hl_knee_idx], self.dof_vel[:, hr_knee_idx]), dim=1)
+        velocity_gate = torch.exp(-0.05 * torch.sum(torch.square(knee_vel), dim=1))
+
+        guard = front_clear_gate * orientation_gate * height_gate * velocity_gate
+        return guard
     
     def _reward_hind_leg_extension_geom(self):
         # Indices based on your printout
@@ -1633,31 +1805,79 @@ class LeggedRobot(BaseTask):
 
         return normalized
 
-    def _reward_hind_leg_stretch(self):
-        # Get z (height) positions of hind legs
-        hind_leg_heights = self.rigid_body_state[:, self.hind_feet_ids, 2]  # (N, num_hind_legs)
-
-        # Average height across both hind legs
-        mean_hind_height = torch.mean(hind_leg_heights, dim=-1)
-
-        # Encourage higher legs (standing tall)
-        height_reward = torch.sigmoid(10.0 * (mean_hind_height - 0.2))
-        # 0.2 = baseline crouch height, tune for your model
-        # 10.0 = sharpness of transition
-
-        # Contact forces in +z (standing support)
-        contact_forces_z = torch.clamp(self.contact_forces[:, self.hind_feet_ids, 2], min=0.0)
-        mean_contact = torch.mean(contact_forces_z, dim=-1)
-        contact_reward = torch.sigmoid(mean_contact * 5.0)
-
-        # Combine: high reward if hind feet are tall *and* supporting
-        return height_reward * contact_reward
-
     def _reward_front_legs_up(self):
         contacts = self.contact_filt  # shape [N, 4]
         fl = contacts[:, 0]
         fr = contacts[:, 1]
         return 1.0 - (fl + fr).clamp(0, 1)  # 1 if both off, 0 if either touching
+
+    def _reward_front_legs_up_continuous(self):
+        """Reward sustained front-leg clearance with smooth motion."""
+        if self.front_air_time is None or self.front_feet_ids.numel() == 0:
+            return torch.zeros(self.num_envs, dtype=self.dof_pos.dtype, device=self.device)
+        both_up = self._reward_front_legs_up()
+        if self.hind_feet_ids.numel() > 0:
+            hind_contacts = torch.all(self.contact_filt[:, self.hind_feet_ids], dim=1)
+            hind_support_gate = hind_contacts.to(self.dof_pos.dtype)
+        else:
+            hind_support_gate = torch.ones(self.num_envs, dtype=self.dof_pos.dtype, device=self.device)
+
+        min_air = torch.min(self.front_air_time, dim=1).values
+        min_duration = 0.2
+        target_duration = 0.6
+        duration_reward = torch.clamp((min_air - min_duration) / (target_duration - min_duration), min=0.0, max=1.0)
+
+        front_body_indices = self.feet_indices[self.front_feet_ids]
+        front_vel = self.rigid_body_state[:, front_body_indices, 7:10]
+        vertical_speed = torch.abs(front_vel[:, :, 2]).mean(dim=1)
+        velocity_gate = torch.exp(-5.0 * vertical_speed)
+
+        pitch = torch.abs(self.rpy[:, 1])
+        roll = torch.abs(self.rpy[:, 0])
+        orientation_gate = torch.exp(-(torch.square(pitch) + torch.square(roll)) / 0.1)
+
+        base_height = self.root_states[:, 2]
+        height_gate = torch.clamp((base_height - 0.35) / 0.2, min=0.0, max=1.0)
+
+        rotation_gate = torch.exp(-2.0 * torch.square(self.base_ang_vel[:, 2]))
+
+        return both_up * duration_reward * velocity_gate * orientation_gate * height_gate * hind_support_gate * rotation_gate
+
+    def _reward_front_legs_up_warmup(self):
+        """Transition reward to guide the robot toward stable front-leg lifting."""
+        if self.front_air_time is None or self.front_feet_ids.numel() == 0:
+            return torch.zeros(self.num_envs, dtype=self.dof_pos.dtype, device=self.device)
+
+        both_up = self._reward_front_legs_up()
+
+        if self.hind_feet_ids.numel() > 0:
+            hind_contacts = torch.all(self.contact_filt[:, self.hind_feet_ids], dim=1)
+            hind_support_gate = hind_contacts.to(self.dof_pos.dtype)
+        else:
+            hind_support_gate = torch.ones(self.num_envs, dtype=self.dof_pos.dtype, device=self.device)
+        if not torch.is_tensor(both_up):
+            both_up = torch.tensor(both_up, dtype=self.dof_pos.dtype, device=self.device)
+
+        min_air = torch.min(self.front_air_time, dim=1).values
+        short_target = 0.3  # seconds
+        duration_reward = torch.clamp(min_air / short_target, 0.0, 1.0)
+
+        front_body_indices = self.feet_indices[self.front_feet_ids]
+        front_vel = self.rigid_body_state[:, front_body_indices, 7:10]
+        vertical_speed = torch.abs(front_vel[:, :, 2]).mean(dim=1)
+        velocity_gate = torch.exp(-2.0 * vertical_speed)
+
+        pitch = torch.abs(self.rpy[:, 1])
+        roll = torch.abs(self.rpy[:, 0])
+        orientation_gate = torch.exp(-(torch.square(pitch) + torch.square(roll)) / 0.3)
+
+        base_height = self.root_states[:, 2]
+        height_gate = torch.clamp((base_height - 0.30) / 0.15, min=0.0, max=1.0)
+
+        rotation_gate = torch.exp(-1.5 * torch.square(self.base_ang_vel[:, 2]))
+
+        base_score = 0.4 + 0.6 * duration_reward
+        return both_up * base_score * velocity_gate * orientation_gate * height_gate * hind_support_gate * rotation_gate
 
     def _reward_foot_stillness(self):
         foot_velocities = self.root_states[:, 7:10]  # or use proper frame transform

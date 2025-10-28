@@ -67,28 +67,15 @@ class TwoLegStandCfg(LeggedRobotCfg):
 
         class scales(LeggedRobotCfg.rewards.scales):
             torso_upright = 3.0
-            # hind_knee_extension = 7.0
-            hind_leg_extension_geom = 4.0
+            front_legs_up_warmup = 1.0
+            human_posture_warmup = 1.0
+            torso_upright_soften = 1.0
+            human_posture = 1.0
             front_legs_up = 1.0
             base_height = -0.5
             termination = -10.0
-            # orientation = -1.0
-            # base_height = -0.5
             stand_still = 1.0
-            # torques = -0.0001
-            # action_rate = -0.01
-            # collision = -1.0
-            # termination = -10.0
-
-            # # NEW: encourage torso uprightness
-            # torso_upright = 3.0
-
-            # # NEW: reward front legs off ground
-            front_legs_up = 1.0
-            # # NEW: reward for hind knee extension
-            # hind_knee_extension = 2.0
-            # # NEW: reward for stable feet (discourage thrashing)
-            # foot_stillness = 1.0
+            front_legs_up_continuous = 1.0 
 
             # Disabled locomotion terms
             tracking_lin_vel = 0.0
@@ -107,37 +94,57 @@ class TwoLegStandCfg(LeggedRobotCfg):
         class curriculum:
             enabled = True
             log_curriculum = True
+            class front_touch_termination:
+                enabled = False
+                metrics = {
+                    "human_posture": 0.0,
+                    "front_legs_up_continuous": 0.0,
+                }
+                log_enable = True
 
             phases = [
                 {
-                    "name": "phase_0_basic_balance",
+                    "name": "phase_0_legs_up_warmup",
                     "trigger_thresh": 500,
                     "reward_scales": {
-                        "front_legs_up": 4.0,
-                        "torso_upright": 4.0,
+                        "front_legs_up_warmup": 10.0,
+                        # "stand_still": 0.2,
+                        "torso_upright_soften": 1.0,
+                        "termination": -10.0,
+                    }
+                },
+                {
+                    "name": "phase_1_basic",
+                    "trigger_thresh": 500,
+                    "reward_scales": {
+                        "front_legs_up_warmup": 5.0,
+                        "human_posture_warmup": 2.0,
+                        "torso_upright_soften": 1.0,
+                        "stand_still": 0.25,
                         "termination": -10.0,
                     }
                 },
                 {
                     "name": "phase_1_posture_alignment",
-                    "trigger_thresh": 1000,
+                    "trigger_thresh": 1500,
                     "reward_scales": {
-                        "base_height": -1,
-                        "hind_leg_extension_geom": 4.0,
+                        "human_posture": 6.0,
+                        "front_legs_up_continuous": 3.0,
                         "front_legs_up": 1.0,
-                        # "torso_upright": 10.0,
+                        "torso_upright_soften": 1.5,
+                        "stand_still": 0.3,
                         "termination": -10.0,
                     }
                 },
                 {
                     "name": "phase_2_fine_standing",
-                    "trigger_thresh": np.inf,
+                    "trigger_thresh": 3000,
                     "reward_scales": {
-                        # "hind_leg_stretch": 4.0,
-                        "front_legs_up": 1.0,
-                        "torso_upright": 3.0,
+                        "human_posture": 5.0,
+                        "front_legs_up_continuous": 4.0,
+                        "torso_upright_soften": 3.0,
                         "termination": -10.0,
-                        "stand_still": 1.0
+                        "stand_still": 0.35
                     }
                 }
             ]

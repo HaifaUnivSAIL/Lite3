@@ -15,6 +15,8 @@ class CurriculumController:
         self.phases = curriculum_cfg.phases
         self.current_phase = 0
         self.log_rewards = getattr(curriculum_cfg, "log_curriculum", False)
+        self.front_touch_cfg = getattr(curriculum_cfg, "front_touch_termination", None)
+        self.front_touch_enabled = False
 
     def get_progress_buf(self, buf_element):
         self.progress_buf = buf_element
@@ -24,7 +26,8 @@ class CurriculumController:
         if not self.enabled:
             return
         avg_progress = self.progress_buf#.float().mean().item()
-        if avg_progress >= self.phases[self.current_phase]["trigger_thresh"]:
+        if self.current_phase < len(self.phases) - 1 and \
+                avg_progress >= self.phases[self.current_phase]["trigger_thresh"]:
             self.current_phase +=1
         self.current_scales = self.phases[self.current_phase]["reward_scales"]
         active_names = self.current_scales.keys()
@@ -36,3 +39,26 @@ class CurriculumController:
         print(f"[Curriculum] Phase {self.current_phase} reward contributions:")
         for k, v in episode_sums.items():
             print(f" - {k}: {v.mean().item():.3f}")
+
+    def update_performance(self, performance_metrics):
+        if not self.enabled or self.front_touch_enabled:
+            return
+        if self.front_touch_cfg is None or not getattr(self.front_touch_cfg, "enabled", False):
+            return
+        thresholds = getattr(self.front_touch_cfg, "metrics", None)
+        if thresholds is None:
+            return
+        if isinstance(thresholds, dict):
+            items = thresholds.items()
+        else:
+            items = thresholds.__dict__.items()
+        for name, threshold in items:
+            metric_value = performance_metrics.get(name, None)
+            if metric_value is None or metric_value < threshold:
+                return
+        self.front_touch_enabled = True
+        if getattr(self.front_touch_cfg, "log_enable", True):
+            print(f"[Curriculum] Front-leg termination enabled based on metrics: {performance_metrics}")
+
+    def front_touch_active(self):
+        return self.front_touch_enabled
