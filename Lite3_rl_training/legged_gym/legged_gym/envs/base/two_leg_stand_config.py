@@ -70,6 +70,8 @@ class TwoLegStandCfg(LeggedRobotCfg):
             front_legs_up_warmup = 1.0
             human_posture_warmup = 1.0
             torso_upright_soften = 1.0
+            torso_upright_warmup = 1.0
+            torso_upright_continuous = 2.0
             human_posture = 1.0
             front_legs_up = 1.0
             base_height = -0.5
@@ -108,18 +110,17 @@ class TwoLegStandCfg(LeggedRobotCfg):
                     "trigger_thresh": 500,
                     "reward_scales": {
                         "front_legs_up_warmup": 10.0,
-                        # "stand_still": 0.2,
-                        "torso_upright_soften": 1.0,
+                        "torso_upright_warmup": 1.0,
                         "termination": -10.0,
                     }
                 },
                 {
-                    "name": "phase_1_basic",
-                    "trigger_thresh": 500,
+                    "name": "phase_0_basic",
+                    "trigger_thresh": 1000,
                     "reward_scales": {
                         "front_legs_up_warmup": 5.0,
                         "human_posture_warmup": 2.0,
-                        "torso_upright_soften": 1.0,
+                        "torso_upright_warmup": 5.0,
                         "stand_still": 0.25,
                         "termination": -10.0,
                     }
@@ -128,21 +129,21 @@ class TwoLegStandCfg(LeggedRobotCfg):
                     "name": "phase_1_posture_alignment",
                     "trigger_thresh": 1500,
                     "reward_scales": {
-                        "human_posture": 6.0,
-                        "front_legs_up_continuous": 3.0,
-                        "front_legs_up": 1.0,
-                        "torso_upright_soften": 1.5,
+                        "human_posture": 3.0,
+                        "front_legs_up_continuous": 10.0,
+                        "torso_upright_soften": 1.0,
+                        "torso_upright_continuous": 3.0,
                         "stand_still": 0.3,
                         "termination": -10.0,
                     }
                 },
                 {
                     "name": "phase_2_fine_standing",
-                    "trigger_thresh": 3000,
+                    "trigger_thresh": 2000,
                     "reward_scales": {
                         "human_posture": 5.0,
                         "front_legs_up_continuous": 4.0,
-                        "torso_upright_soften": 3.0,
+                        "torso_upright_continuous": 3.0,
                         "termination": -10.0,
                         "stand_still": 0.35
                     }
