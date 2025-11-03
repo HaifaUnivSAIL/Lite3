@@ -1,0 +1,75 @@
+{
+  "name": "two_leg_stand_shallow",
+  "description": "Quick Bayesian sweep exploring core PPO and reward shaping knobs for Lite3 two-leg stand.",
+  "metric": {
+    "name": "episode_reward_mean",
+    "goal": "maximize"
+  },
+  "parameters": {
+    "train_cfg.algorithm.learning_rate": {
+      "distribution": "log_uniform_values",
+      "min": 0.0003,
+      "max": 0.003
+    },
+    "train_cfg.algorithm.entropy_coef": {
+      "distribution": "uniform",
+      "min": 0.005,
+      "max": 0.02
+    },
+    "train_cfg.algorithm.num_learning_epochs": {
+      "values": [3, 4, 5]
+    },
+    "train_cfg.algorithm.num_mini_batches": {
+      "values": [2, 4, 6, 8]
+    },
+    "train_cfg.policy.init_noise_std": {
+      "distribution": "uniform",
+      "min": 0.7,
+      "max": 1.3
+    },
+    "train_cfg.runner.num_steps_per_env": {
+      "values": [20, 24, 28, 32]
+    },
+    "env_cfg.control.action_scale": {
+      "distribution": "uniform",
+      "min": 0.22,
+      "max": 0.34
+    },
+    "env_cfg.control.stiffness.joint": {
+      "distribution": "uniform",
+      "min": 18.0,
+      "max": 28.0
+    },
+    "env_cfg.control.damping.joint": {
+      "distribution": "uniform",
+      "min": 0.5,
+      "max": 1.1
+    },
+    "env_cfg.rewards.scales.torso_upright_continuous": {
+      "distribution": "uniform",
+      "min": 1.5,
+      "max": 3.5
+    },
+    "env_cfg.rewards.scales.front_legs_up_continuous": {
+      "distribution": "uniform",
+      "min": 0.8,
+      "max": 2.5
+    },
+    "env_cfg.rewards.scales.human_posture": {
+      "distribution": "uniform",
+      "min": 0.5,
+      "max": 2.0
+    },
+    "env_cfg.rewards.scales.stand_still": {
+      "distribution": "uniform",
+      "min": 0.2,
+      "max": 0.5
+    },
+    "env_cfg.rewards.scales.termination": {
+      "distribution": "uniform",
+      "min": -12.0,
+      "max": -8.0
+    }
+  }
+}
+

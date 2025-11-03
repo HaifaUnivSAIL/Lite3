@@ -1,3 +1,10 @@
 # Ignore the manually extracted isaacgym folder (if exists):
 /isaacgym/
 /.idea/
+
+# Ignore W&B run artifacts inside training workspace but keep scripts/templates
+Lite3_rl_training/wandb/*
+!Lite3_rl_training/wandb/*.py
+!Lite3_rl_training/wandb/templates/
+Lite3_rl_training/wandb/templates/*
+!Lite3_rl_training/wandb/templates/*.json

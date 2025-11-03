@@ -1,0 +1,163 @@
+{
+  "name": "two_leg_stand_exhaustive",
+  "description": "Extended Bayesian sweep spanning PPO stability, curriculum pacing, actuator tuning, and reward shaping for Lite3 two-leg stand.",
+  "metric": {
+    "name": "episode_reward_mean",
+    "goal": "maximize"
+  },
+  "parameters": {
+    "train_cfg.algorithm.learning_rate": {
+      "distribution": "log_uniform_values",
+      "min": 0.0001,
+      "max": 0.004
+    },
+    "train_cfg.algorithm.entropy_coef": {
+      "distribution": "uniform",
+      "min": 0.003,
+      "max": 0.025
+    },
+    "train_cfg.algorithm.value_loss_coef": {
+      "distribution": "uniform",
+      "min": 0.7,
+      "max": 1.3
+    },
+    "train_cfg.algorithm.clip_param": {
+      "distribution": "uniform",
+      "min": 0.15,
+      "max": 0.3
+    },
+    "train_cfg.algorithm.desired_kl": {
+      "distribution": "uniform",
+      "min": 0.006,
+      "max": 0.02
+    },
+    "train_cfg.algorithm.gamma": {
+      "distribution": "uniform",
+      "min": 0.96,
+      "max": 0.995
+    },
+    "train_cfg.algorithm.lam": {
+      "distribution": "uniform",
+      "min": 0.92,
+      "max": 0.98
+    },
+    "train_cfg.algorithm.max_grad_norm": {
+      "distribution": "uniform",
+      "min": 0.6,
+      "max": 1.5
+    },
+    "train_cfg.algorithm.num_learning_epochs": {
+      "values": [2, 3, 4, 5, 6]
+    },
+    "train_cfg.algorithm.num_mini_batches": {
+      "values": [2, 4, 6, 8, 10]
+    },
+    "train_cfg.policy.init_noise_std": {
+      "distribution": "uniform",
+      "min": 0.6,
+      "max": 1.4
+    },
+    "train_cfg.policy.activation": {
+      "values": ["elu", "relu", "tanh"]
+    },
+    "train_cfg.runner.num_steps_per_env": {
+      "values": [18, 22, 26, 30, 34]
+    },
+    "train_cfg.runner.max_iterations": {
+      "values": [12000, 15000, 18000]
+    },
+    "train_cfg.runner.save_interval": {
+      "values": [250, 500, 750]
+    },
+    "env_cfg.env.curriculum_factor": {
+      "distribution": "uniform",
+      "min": 0.7,
+      "max": 0.9
+    },
+    "env_cfg.control.action_scale": {
+      "distribution": "uniform",
+      "min": 0.18,
+      "max": 0.36
+    },
+    "env_cfg.control.decimation": {
+      "values": [3, 4, 5]
+    },
+    "env_cfg.control.stiffness.joint": {
+      "distribution": "uniform",
+      "min": 15.0,
+      "max": 32.0
+    },
+    "env_cfg.control.damping.joint": {
+      "distribution": "uniform",
+      "min": 0.4,
+      "max": 1.2
+    },
+    "env_cfg.rewards.scales.torso_upright": {
+      "distribution": "uniform",
+      "min": 2.0,
+      "max": 4.5
+    },
+    "env_cfg.rewards.scales.torso_upright_continuous": {
+      "distribution": "uniform",
+      "min": 1.5,
+      "max": 4.5
+    },
+    "env_cfg.rewards.scales.front_legs_up": {
+      "distribution": "uniform",
+      "min": 0.5,
+      "max": 2.5
+    },
+    "env_cfg.rewards.scales.front_legs_up_continuous": {
+      "distribution": "uniform",
+      "min": 0.5,
+      "max": 3.5
+    },
+    "env_cfg.rewards.scales.human_posture": {
+      "distribution": "uniform",
+      "min": 0.5,
+      "max": 3.0
+    },
+    "env_cfg.rewards.scales.stand_still": {
+      "distribution": "uniform",
+      "min": 0.15,
+      "max": 0.6
+    },
+    "env_cfg.rewards.scales.base_height": {
+      "distribution": "uniform",
+      "min": -0.8,
+      "max": -0.2
+    },
+    "env_cfg.rewards.scales.termination": {
+      "distribution": "uniform",
+      "min": -15.0,
+      "max": -7.0
+    },
+    "env_cfg.rewards.reward_upright_tolerance": {
+      "distribution": "uniform",
+      "min": 0.15,
+      "max": 0.3
+    },
+    "env_cfg.rewards.torso_upright_pitch_tolerance": {
+      "distribution": "uniform",
+      "min": 0.2,
+      "max": 0.5
+    },
+    "env_cfg.rewards.front_foot_contact_penalty": {
+      "distribution": "uniform",
+      "min": -4.0,
+      "max": -1.0
+    },
+    "env_cfg.rewards.only_positive_rewards": {
+      "values": [true, false]
+    },
+    "env_cfg.domain_rand.randomize_friction": {
+      "values": [true, false]
+    },
+    "env_cfg.domain_rand.randomize_motor_strength": {
+      "values": [true, false]
+    },
+    "env_cfg.noise.add_noise": {
+      "values": [true, false]
+    }
+  }
+}
