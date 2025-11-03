@@ -5,6 +5,7 @@
 # Ignore W&B run artifacts inside training workspace but keep scripts/templates
 Lite3_rl_training/wandb/*
 !Lite3_rl_training/wandb/*.py
+!Lite3_rl_training/wandb/*.sh
 !Lite3_rl_training/wandb/templates/
 Lite3_rl_training/wandb/templates/*
 !Lite3_rl_training/wandb/templates/*.json
