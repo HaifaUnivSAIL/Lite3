@@ -120,7 +120,7 @@ class TwoLegStandCfg(LeggedRobotCfg):
                     "reward_scales": {
                         "front_legs_up_warmup": 5.0,
                         "human_posture_warmup": 2.0,
-                        "torso_upright_warmup": 5.0,
+                        "torso_upright_warmup": 1.0,
                         "stand_still": 0.25,
                         "termination": -10.0,
                     }
