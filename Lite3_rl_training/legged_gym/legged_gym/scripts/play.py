@@ -20,7 +20,7 @@ def play(args):
     register(args.task, task_registry)
     env_cfg, train_cfg = task_registry.get_cfgs(name=args.task)
     # override some parameters for testing
-    env_cfg.env.num_envs = 10
+    env_cfg.env.num_envs = args.num_envs or 10
 
     env_cfg.viewer.real_time_step = True
     env_cfg.pmtg.train_mode = False
