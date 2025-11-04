@@ -364,15 +364,40 @@ def main() -> None:
                 if rewards_csv.exists():
                     with rewards_csv.open("r", encoding="utf-8") as reward_file:
                         reader = csv.DictReader(reward_file)
-                        reward_values = [
-                            float(row["total_reward"])
-                            for row in reader
-                            if "total_reward" in row and row["total_reward"] not in ("", "nan")
-                        ]
-                    if reward_values:
-                        wandb.summary["episode_reward_mean"] = sum(reward_values) / len(reward_values)
-                        wandb.summary["episode_reward_max"] = max(reward_values)
-                        wandb.summary["episode_reward_last"] = reward_values[-1]
+                        aggregates: Dict[str, float] = {}
+                        last_values: Dict[str, float] = {}
+                        max_values: Dict[str, float] = {}
+                        count = 0
+                        for row in reader:
+                            count += 1
+                            for key, value in row.items():
+                                if key is None or key == "":
+                                    continue
+                                try:
+                                    numeric = float(value)
+                                except (TypeError, ValueError):
+                                    continue
+                                aggregates[key] = aggregates.get(key, 0.0) + numeric
+                                last_values[key] = numeric
+                                max_values[key] = numeric if key not in max_values else max(max_values[key], numeric)
+                        if count > 0:
+                            mean_values = {k: v / count for k, v in aggregates.items()}
+                            if "total_reward" in mean_values:
+                                wandb.summary["episode_reward_mean"] = mean_values["total_reward"]
+                                wandb.summary["episode_reward_max"] = max_values.get("total_reward", mean_values["total_reward"])
+                                wandb.summary["episode_reward_last"] = last_values.get("total_reward", 0.0)
+                            stability_mean = mean_values.get("two_leg_stability")
+                            if stability_mean is not None:
+                                wandb.summary["two_leg_stability_mean"] = stability_mean
+                                wandb.summary["two_leg_stability_last"] = last_values.get("two_leg_stability", stability_mean)
+                                wandb.log({
+                                    "metrics/two_leg_stability_mean": stability_mean,
+                                    "metrics/two_leg_stability_last": last_values.get("two_leg_stability", stability_mean),
+                                })
+                            wandb.log({
+                                "metrics/episode_reward_mean": wandb.summary.get("episode_reward_mean"),
+                                "metrics/episode_reward_last": wandb.summary.get("episode_reward_last"),
+                            })
 
     wandb.agent(args.sweep_id, function=sweep_train, count=args.num_runs)
 

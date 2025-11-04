@@ -321,6 +321,11 @@ class LeggedRobot(BaseTask):
             self.extras["episode"]['rew_' + key] = mean_value
             performance_metrics[key] = float(mean_value.detach().cpu())
             self.episode_sums[key][env_ids] = 0.
+
+        metric_mean = torch.mean(self.two_leg_metric_sum[env_ids]) / self.max_episode_length_s
+        self.extras["episode"]["two_leg_stability"] = metric_mean
+        performance_metrics["two_leg_stability"] = float(metric_mean.detach().cpu())
+        self.two_leg_metric_sum[env_ids] = 0.
         if self.front_feet_ids.numel() > 0:
             front_touch_rate = self.front_touch_violation[env_ids].float().mean()
             self.extras["episode"]["front_touch"] = front_touch_rate
@@ -402,6 +407,8 @@ class LeggedRobot(BaseTask):
             ) * self.reward_scales["termination"]
             self.rew_buf += rew
             self.episode_sums["termination"] += rew
+
+        self.two_leg_metric_sum += self._compute_two_leg_stand_metric()
 
     def compute_observations(self):
         self.original_obs_buf = torch.cat(
@@ -1041,6 +1048,10 @@ class LeggedRobot(BaseTask):
                                         device=self.device,
                                         dtype=torch.float,
                                         requires_grad=False)
+        self.two_leg_metric_sum = torch.zeros(self.num_envs,
+                                              dtype=torch.float,
+                                              device=self.device,
+                                              requires_grad=False)
         self.last_last_last_pos = torch.zeros((self.num_envs, self.num_dof),
                                               device=self.device,
                                               dtype=torch.float,
@@ -1917,6 +1928,50 @@ class LeggedRobot(BaseTask):
         foot_velocities = self.root_states[:, 7:10]  # or use proper frame transform
         speed = torch.norm(foot_velocities, dim=1)
         return torch.clamp(1.0 - speed / 1.0, min=0.0)
+
+    def _compute_two_leg_stand_metric(self):
+        """Compute a normalized stability metric for upright two-leg standing."""
+        components = []
+
+        if self.front_feet_ids.numel() > 0:
+            front_contact = torch.any(self.contact_filt[:, self.front_feet_ids], dim=1)
+            front_clear = (~front_contact).to(self.dof_pos.dtype)
+        else:
+            front_clear = torch.ones(self.num_envs, dtype=self.dof_pos.dtype, device=self.device)
+        components.append(front_clear)
+
+        if self.hind_feet_ids.numel() > 0:
+            hind_support = torch.all(self.contact_filt[:, self.hind_feet_ids], dim=1).to(self.dof_pos.dtype)
+        else:
+            hind_support = torch.ones(self.num_envs, dtype=self.dof_pos.dtype, device=self.device)
+        components.append(hind_support)
+
+        pitch = torch.abs(self.rpy[:, 1])
+        roll = torch.abs(self.rpy[:, 0])
+        orientation_gate = torch.exp(-(torch.square(pitch) + torch.square(roll)) / 0.12)
+        components.append(torch.clamp(orientation_gate, 0.0, 1.0))
+
+        base_height = self.root_states[:, 2]
+        height_gate = torch.clamp((base_height - 0.35) / 0.2, min=0.0, max=1.0)
+        components.append(height_gate)
+
+        lin_speed = torch.norm(self.base_lin_vel[:, :2], dim=1)
+        lin_gate = torch.exp(-torch.square(lin_speed / 0.35))
+        components.append(torch.clamp(lin_gate, 0.0, 1.0))
+
+        ang_speed = torch.norm(self.base_ang_vel, dim=1)
+        ang_gate = torch.exp(-torch.square(ang_speed / 1.2))
+        components.append(torch.clamp(ang_gate, 0.0, 1.0))
+
+        if self.front_feet_ids.numel() > 0:
+            front_body_indices = self.feet_indices[self.front_feet_ids]
+            front_vel = self.rigid_body_state[:, front_body_indices, 7:10]
+            vertical_speed = torch.abs(front_vel[:, :, 2]).mean(dim=1)
+            tapping_gate = torch.exp(-5.0 * vertical_speed)
+            components.append(torch.clamp(tapping_gate, 0.0, 1.0))
+
+        metric = torch.stack(components, dim=1).mean(dim=1)
+        return torch.clamp(metric, 0.0, 1.0)
 
     # def _reward_feet_height(self):
     #     # Penalize feet height error
