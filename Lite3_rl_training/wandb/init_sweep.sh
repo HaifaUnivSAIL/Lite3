@@ -8,7 +8,7 @@ TEMPLATE_DIR="${SCRIPT_DIR}/templates"
 
 usage() {
     cat <<EOF
-Usage: $(basename "$0") -t <template> -e <entity> -p <project> [--dry-run] [--output <file>]
+Usage: $(basename "$0") -t <template> -e <entity> -p <project> [--dry-run] [--output <file>] [--no-defaults]
 
 Templates:
   shallow      -> ${TEMPLATE_DIR}/two_leg_stand_shallow.json
@@ -25,6 +25,7 @@ ENTITY=""
 PROJECT=""
 DRY_RUN=0
 OUTPUT=""
+INCLUDE_DEFAULTS=1
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -47,6 +48,10 @@ while [[ $# -gt 0 ]]; do
         --output)
             OUTPUT="$2"
             shift 2
+            ;;
+        --no-defaults)
+            INCLUDE_DEFAULTS=0
+            shift
             ;;
         -h|--help)
             usage
@@ -99,6 +104,10 @@ fi
 
 if [[ -n "${OUTPUT}" ]]; then
     CMD+=(--output "${OUTPUT}")
+fi
+
+if [[ ${INCLUDE_DEFAULTS} -eq 0 ]]; then
+    CMD+=(--no-defaults)
 fi
 
 echo "Running: ${CMD[*]}"

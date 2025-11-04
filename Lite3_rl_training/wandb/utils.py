@@ -167,27 +167,50 @@ def dotted_to_nested(flat_dict: Dict[str, Any]) -> Dict[str, Any]:
             return base, index
         return part, None
 
+    def _ensure_dict_container(container: Dict[str, Any], key: str) -> Dict[str, Any]:
+        existing = container.get(key)
+        if isinstance(existing, list):
+            existing = {i: element for i, element in enumerate(existing)}
+            container[key] = existing
+        if existing is None or not isinstance(existing, dict):
+            existing = {}
+            container[key] = existing
+        return existing
+
     for dotted_key, value in flat_dict.items():
         cursor = nested
         parts = dotted_key.split(".")
         for i, part in enumerate(parts):
             base_name, list_index = _parse_part(part)
             is_last = i == len(parts) - 1
+
             if list_index is None:
                 if is_last:
                     cursor[base_name] = value
                 else:
-                    cursor = cursor.setdefault(base_name, {})
+                    cursor = _ensure_dict_container(cursor, base_name)
             else:
-                container = cursor.setdefault(base_name, {})
-                if not isinstance(container, dict):
+                existing = cursor.get(base_name)
+                if isinstance(existing, list):
+                    cursor[base_name] = {idx: element for idx, element in enumerate(existing)}
+                    existing = cursor[base_name]
+                if existing is None:
+                    cursor[base_name] = {}
+                    existing = cursor[base_name]
+                if not isinstance(existing, dict):
                     raise WandbConfigError(
-                        f"Expected dict container for list overrides at '{part}', got {type(container).__name__}"
+                        f"Expected dict container for list overrides at '{part}', got {type(existing).__name__}"
                     )
                 if is_last:
-                    container[list_index] = value
+                    existing[list_index] = value
                 else:
-                    cursor = container.setdefault(list_index, {})
+                    next_container = existing.get(list_index)
+                    if isinstance(next_container, list):
+                        existing[list_index] = {idx: element for idx, element in enumerate(next_container)}
+                        next_container = existing[list_index]
+                    if next_container is None or not isinstance(next_container, dict):
+                        existing[list_index] = {} if next_container is None else next_container
+                    cursor = existing[list_index]
     return nested
 
 
@@ -203,11 +226,25 @@ def apply_overrides(target: Any, overrides: Dict[str, Any]) -> None:
                 target_dict[sub_key] = sub_value
 
     for key, value in overrides.items():
-        if not hasattr(target, key):
+        attribute_name = key
+        attr = getattr(target, attribute_name, None)
+
+        if attr is None and hasattr(target, "asset") and hasattr(target.asset, attribute_name):
+            attr = getattr(target.asset, attribute_name)
+            target_container = target.asset
+        elif attr is None and hasattr(target, "rewards") and hasattr(target.rewards, attribute_name):
+            attr = getattr(target.rewards, attribute_name)
+            target_container = target.rewards
+        elif attr is None and hasattr(target, "commands") and hasattr(target.commands, attribute_name):
+            attr = getattr(target.commands, attribute_name)
+            target_container = target.commands
+        else:
+            target_container = target
+
+        if attr is None:
             raise WandbConfigError(
                 f"Cannot apply override '{key}' - attribute not found on '{type(target).__name__}'"
             )
-        attr = getattr(target, key)
 
         if isinstance(value, dict) and value and all(isinstance(k, int) for k in value.keys()):
             if not isinstance(attr, list):
@@ -241,7 +278,7 @@ def apply_overrides(target: Any, overrides: Dict[str, Any]) -> None:
                     setattr(attr, sub_key, sub_val)
             continue
 
-        setattr(target, key, value)
+        setattr(target_container, attribute_name, value)
 
 
 def build_sweep_parameters(

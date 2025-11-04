@@ -4,6 +4,7 @@ import importlib
 import importlib.util
 import json
 import os
+import re
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -65,6 +66,19 @@ def _import_external_wandb():
 
 wandb = _import_external_wandb()
 os.environ.setdefault("WANDB_CONSOLE", "off")
+
+
+def _translate_sweep_key(key: str) -> str:
+    pattern = re.compile(r"(phases|phase)_([0-9]+)")
+
+    def replacer(match: re.Match) -> str:
+        group, index = match.groups()
+        if group == "phase":
+            group = "phases"
+        return f"{group}[{index}]"
+
+    return pattern.sub(replacer, key)
+
 
 from legged_gym.utils.helpers import class_to_dict, register
 from legged_gym.utils.task_registry import task_registry
@@ -293,8 +307,10 @@ def main() -> None:
                 raise SystemExit(str(exc)) from exc
 
             grouped = group_by_prefix(flat_config, prefixes=("env_cfg", "train_cfg"))
-            env_overrides = dotted_to_nested(grouped["env_cfg"]) if grouped["env_cfg"] else {}
-            train_overrides = dotted_to_nested(grouped["train_cfg"]) if grouped["train_cfg"] else {}
+            translated_env = { _translate_sweep_key(k): v for k, v in grouped["env_cfg"].items() }
+            translated_train = { _translate_sweep_key(k): v for k, v in grouped["train_cfg"].items() }
+            env_overrides = dotted_to_nested(translated_env) if translated_env else {}
+            train_overrides = dotted_to_nested(translated_train) if translated_train else {}
             if env_overrides:
                 apply_overrides(env_cfg, env_overrides)
             if train_overrides:

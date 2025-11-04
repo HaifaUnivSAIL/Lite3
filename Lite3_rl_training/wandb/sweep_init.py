@@ -110,6 +110,19 @@ def parse_args() -> argparse.Namespace:
         action="store_false",
         help="Create the sweep on W&B even if --output is supplied.",
     )
+    parser.add_argument(
+        "--no-defaults",
+        dest="include_defaults",
+        action="store_false",
+        help="Do not seed the sweep config with all default parameters from the Lite3 config.",
+    )
+    parser.add_argument(
+        "--include-defaults",
+        dest="include_defaults",
+        action="store_true",
+        help="Seed the sweep config with default values for every parameter (current behaviour).",
+    )
+    parser.set_defaults(include_defaults=True)
     parser.set_defaults(dry_run=False)
     return parser.parse_args()
 
@@ -127,20 +140,21 @@ def load_template(path: Path) -> Dict[str, Any]:
     return template
 
 
-def merge_parameters(template: Dict[str, Any], defaults: Dict[str, Any]) -> Dict[str, Any]:
+def merge_parameters(template: Dict[str, Any], defaults: Dict[str, Any], include_defaults: bool) -> Dict[str, Any]:
     merged = dict(template)
     params = merged.setdefault("parameters", {})
     if not isinstance(params, dict):
         raise SystemExit("Expected 'parameters' in the template to be a JSON object.")
-    for key, value in defaults.items():
-        param_block = params.get(key)
-        if isinstance(param_block, dict):
-            params.setdefault(key, param_block)
-            uses_distribution = "distribution" in param_block or "values" in param_block
-            if not uses_distribution:
-                params[key].setdefault("value", value)
-        else:
-            params[key] = {"value": value}
+    if include_defaults:
+        for key, value in defaults.items():
+            param_block = params.get(key)
+            if isinstance(param_block, dict):
+                params.setdefault(key, param_block)
+                uses_distribution = "distribution" in param_block or "values" in param_block
+                if not uses_distribution:
+                    params[key].setdefault("value", value)
+            else:
+                params[key] = {"value": value}
     merged["method"] = "bayes"
     return merged
 
@@ -159,7 +173,7 @@ def main() -> None:
 
     defaults = build_sweep_parameters(env_cfg, train_cfg)
     template = load_template(args.template)
-    merged = merge_parameters(template, defaults)
+    merged = merge_parameters(template, defaults, include_defaults=args.include_defaults)
     export_payload: Dict[str, Any] = dict(merged)
     if args.entity or args.project:
         export_payload.setdefault("__wandb", {})

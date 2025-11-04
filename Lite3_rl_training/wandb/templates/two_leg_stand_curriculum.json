@@ -6,99 +6,99 @@
     "goal": "maximize"
   },
   "parameters": {
-    "env_cfg.rewards.curriculum.phases[0].trigger_thresh": {
+    "env_cfg.rewards.curriculum.phases_0.trigger_thresh": {
       "values": [400, 500, 600]
     },
-    "env_cfg.rewards.curriculum.phases[0].reward_scales.front_legs_up_warmup": {
+    "env_cfg.rewards.curriculum.phases_0.reward_scales.front_legs_up_warmup": {
       "distribution": "uniform",
       "min": 5.0,
       "max": 15.0
     },
-    "env_cfg.rewards.curriculum.phases[0].reward_scales.torso_upright_warmup": {
+    "env_cfg.rewards.curriculum.phases_0.reward_scales.torso_upright_warmup": {
       "distribution": "uniform",
       "min": 0.5,
       "max": 2.0
     },
-    "env_cfg.rewards.curriculum.phases[0].reward_scales.termination": {
+    "env_cfg.rewards.curriculum.phases_0.reward_scales.termination": {
       "distribution": "uniform",
       "min": -12.0,
       "max": -6.0
     },
-    "env_cfg.rewards.curriculum.phases[1].trigger_thresh": {
+    "env_cfg.rewards.curriculum.phases_1.trigger_thresh": {
       "values": [900, 1000, 1100]
     },
-    "env_cfg.rewards.curriculum.phases[1].reward_scales.front_legs_up_warmup": {
+    "env_cfg.rewards.curriculum.phases_1.reward_scales.front_legs_up_warmup": {
       "distribution": "uniform",
       "min": 3.0,
       "max": 7.0
     },
-    "env_cfg.rewards.curriculum.phases[1].reward_scales.human_posture_warmup": {
+    "env_cfg.rewards.curriculum.phases_1.reward_scales.human_posture_warmup": {
       "distribution": "uniform",
       "min": 1.0,
       "max": 3.0
     },
-    "env_cfg.rewards.curriculum.phases[1].reward_scales.stand_still": {
+    "env_cfg.rewards.curriculum.phases_1.reward_scales.stand_still": {
       "distribution": "uniform",
       "min": 0.1,
       "max": 0.4
     },
-    "env_cfg.rewards.curriculum.phases[1].reward_scales.termination": {
+    "env_cfg.rewards.curriculum.phases_1.reward_scales.termination": {
       "distribution": "uniform",
       "min": -12.0,
       "max": -6.0
     },
-    "env_cfg.rewards.curriculum.phases[2].trigger_thresh": {
+    "env_cfg.rewards.curriculum.phases_2.trigger_thresh": {
       "values": [1400, 1500, 1600]
     },
-    "env_cfg.rewards.curriculum.phases[2].reward_scales.human_posture": {
+    "env_cfg.rewards.curriculum.phases_2.reward_scales.human_posture": {
       "distribution": "uniform",
       "min": 2.0,
       "max": 5.0
     },
-    "env_cfg.rewards.curriculum.phases[2].reward_scales.front_legs_up_continuous": {
+    "env_cfg.rewards.curriculum.phases_2.reward_scales.front_legs_up_continuous": {
       "distribution": "uniform",
       "min": 6.0,
       "max": 14.0
     },
-    "env_cfg.rewards.curriculum.phases[2].reward_scales.torso_upright_continuous": {
+    "env_cfg.rewards.curriculum.phases_2.reward_scales.torso_upright_continuous": {
       "distribution": "uniform",
       "min": 2.0,
       "max": 5.0
     },
-    "env_cfg.rewards.curriculum.phases[2].reward_scales.stand_still": {
+    "env_cfg.rewards.curriculum.phases_2.reward_scales.stand_still": {
       "distribution": "uniform",
       "min": 0.2,
       "max": 0.5
     },
-    "env_cfg.rewards.curriculum.phases[2].reward_scales.termination": {
+    "env_cfg.rewards.curriculum.phases_2.reward_scales.termination": {
       "distribution": "uniform",
       "min": -12.0,
       "max": -6.0
     },
-    "env_cfg.rewards.curriculum.phases[3].trigger_thresh": {
+    "env_cfg.rewards.curriculum.phases_3.trigger_thresh": {
       "values": [1900, 2000, 2100]
     },
-    "env_cfg.rewards.curriculum.phases[3].reward_scales.human_posture": {
+    "env_cfg.rewards.curriculum.phases_3.reward_scales.human_posture": {
       "distribution": "uniform",
       "min": 3.0,
       "max": 6.0
     },
-    "env_cfg.rewards.curriculum.phases[3].reward_scales.front_legs_up_continuous": {
+    "env_cfg.rewards.curriculum.phases_3.reward_scales.front_legs_up_continuous": {
       "distribution": "uniform",
       "min": 3.0,
       "max": 6.0
     },
-    "env_cfg.rewards.curriculum.phases[3].reward_scales.torso_upright_continuous": {
+    "env_cfg.rewards.curriculum.phases_3.reward_scales.torso_upright_continuous": {
       "distribution": "uniform",
       "min": 2.0,
       "max": 5.0
     },
-    "env_cfg.rewards.curriculum.phases[3].reward_scales.stand_still": {
+    "env_cfg.rewards.curriculum.phases_3.reward_scales.stand_still": {
       "distribution": "uniform",
       "min": 0.25,
       "max": 0.6
     },
-    "env_cfg.rewards.curriculum.phases[3].reward_scales.termination": {
+    "env_cfg.rewards.curriculum.phases_3.reward_scales.termination": {
       "distribution": "uniform",
       "min": -12.0,
       "max": -6.0
