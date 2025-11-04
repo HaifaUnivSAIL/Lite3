@@ -13,6 +13,7 @@ Usage: $(basename "$0") -t <template> -e <entity> -p <project> [--dry-run] [--ou
 Templates:
   shallow      -> ${TEMPLATE_DIR}/two_leg_stand_shallow.json
   exhaustive   -> ${TEMPLATE_DIR}/two_leg_stand_exhaustive.json
+  curriculum   -> ${TEMPLATE_DIR}/two_leg_stand_curriculum.json
   <path>       -> explicit path to a custom sweep template
 
 Optional flags map directly to sweep_init.py; defaults assume the Lite3 two-leg stand config.
@@ -71,6 +72,9 @@ case "${TEMPLATE_KEY}" in
         ;;
     exhaustive)
         TEMPLATE="${TEMPLATE_DIR}/two_leg_stand_exhaustive.json"
+        ;;
+    curriculum)
+        TEMPLATE="${TEMPLATE_DIR}/two_leg_stand_curriculum.json"
         ;;
     *)
         TEMPLATE="${TEMPLATE_KEY}"

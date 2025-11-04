@@ -156,12 +156,38 @@ def group_by_prefix(
 
 def dotted_to_nested(flat_dict: Dict[str, Any]) -> Dict[str, Any]:
     nested: Dict[str, Any] = {}
+
+    def _parse_part(part: str) -> Tuple[str, Optional[int]]:
+        if "[" in part and part.endswith("]"):
+            base, index_str = part[:-1].split("[", 1)
+            try:
+                index = int(index_str)
+            except ValueError as exc:
+                raise WandbConfigError(f"Invalid list index in key segment '{part}'") from exc
+            return base, index
+        return part, None
+
     for dotted_key, value in flat_dict.items():
         cursor = nested
         parts = dotted_key.split(".")
-        for part in parts[:-1]:
-            cursor = cursor.setdefault(part, {})
-        cursor[parts[-1]] = value
+        for i, part in enumerate(parts):
+            base_name, list_index = _parse_part(part)
+            is_last = i == len(parts) - 1
+            if list_index is None:
+                if is_last:
+                    cursor[base_name] = value
+                else:
+                    cursor = cursor.setdefault(base_name, {})
+            else:
+                container = cursor.setdefault(base_name, {})
+                if not isinstance(container, dict):
+                    raise WandbConfigError(
+                        f"Expected dict container for list overrides at '{part}', got {type(container).__name__}"
+                    )
+                if is_last:
+                    container[list_index] = value
+                else:
+                    cursor = container.setdefault(list_index, {})
     return nested
 
 
@@ -169,16 +195,53 @@ def apply_overrides(target: Any, overrides: Dict[str, Any]) -> None:
     """
     Recursively apply nested overrides to a config object.
     """
+    def _update_dict_recursive(target_dict: Dict[str, Any], updates: Dict[str, Any]) -> None:
+        for sub_key, sub_value in updates.items():
+            if isinstance(sub_value, dict) and isinstance(target_dict.get(sub_key), dict):
+                _update_dict_recursive(target_dict[sub_key], sub_value)
+            else:
+                target_dict[sub_key] = sub_value
+
     for key, value in overrides.items():
         if not hasattr(target, key):
             raise WandbConfigError(
                 f"Cannot apply override '{key}' - attribute not found on '{type(target).__name__}'"
             )
         attr = getattr(target, key)
-        if isinstance(value, dict) and hasattr(attr, "__dict__"):
-            apply_overrides(attr, value)
-        else:
-            setattr(target, key, value)
+
+        if isinstance(value, dict) and value and all(isinstance(k, int) for k in value.keys()):
+            if not isinstance(attr, list):
+                raise WandbConfigError(
+                    f"Override targets list indices for '{key}' but attribute is {type(attr).__name__}"
+                )
+            for index, sub_value in value.items():
+                if index >= len(attr):
+                    raise WandbConfigError(
+                        f"List index {index} out of range for '{key}' (length {len(attr)})"
+                    )
+                if isinstance(sub_value, dict):
+                    element = attr[index]
+                    if hasattr(element, "__dict__"):
+                        apply_overrides(element, sub_value)
+                    elif isinstance(element, dict):
+                        _update_dict_recursive(element, sub_value)
+                    else:
+                        attr[index] = sub_value
+                else:
+                    attr[index] = sub_value
+            continue
+
+        if isinstance(value, dict):
+            if hasattr(attr, "__dict__"):
+                apply_overrides(attr, value)
+            elif isinstance(attr, dict):
+                _update_dict_recursive(attr, value)
+            else:
+                for sub_key, sub_val in value.items():
+                    setattr(attr, sub_key, sub_val)
+            continue
+
+        setattr(target, key, value)
 
 
 def build_sweep_parameters(
@@ -192,4 +255,3 @@ def build_sweep_parameters(
     params.update(flatten_cfg(env_cfg, "env_cfg"))
     params.update(flatten_cfg(train_cfg, "train_cfg"))
     return params
-
