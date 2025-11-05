@@ -205,6 +205,12 @@ def parse_args() -> argparse.Namespace:
         type=int,
         help="Number of client threads that process env slices.",
     )
+    parser.add_argument(
+        "--wandb-console",
+        choices=["off", "wrap", "redirect", "mute", "stream"],
+        default="off",
+        help="Control how stdout/stderr is captured by W&B (default: off).",
+    )
     return parser.parse_args()
 
 
@@ -286,13 +292,14 @@ def write_config_snapshots(log_dir: str, env_cfg: Any, train_cfg: Any) -> None:
 
 def main() -> None:
     args = parse_args()
+    os.environ["WANDB_CONSOLE"] = args.wandb_console
     try:
         config_module = load_config_module(args.config)
     except WandbConfigError as exc:
         raise SystemExit(str(exc)) from exc
 
     def sweep_train() -> None:
-        with wandb.init(settings=wandb.Settings(console="off")) as run:
+        with wandb.init(settings=wandb.Settings(console=args.wandb_console)) as run:
             flat_config = extract_flat_config(wandb.config)
             warn_for_unhandled(flat_config.keys(), prefixes=("env_cfg", "train_cfg"))
 
