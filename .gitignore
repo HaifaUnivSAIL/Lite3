@@ -6,6 +6,8 @@
 Lite3_rl_training/wandb/*
 !Lite3_rl_training/wandb/*.py
 !Lite3_rl_training/wandb/*.sh
+!Lite3_rl_training/wandb/*.md
+Lite3_rl_training/wandb/wandb-api-key-file
 !Lite3_rl_training/wandb/templates/
 Lite3_rl_training/wandb/templates/*
 !Lite3_rl_training/wandb/templates/*.json
