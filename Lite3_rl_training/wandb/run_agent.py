@@ -10,6 +10,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
+import torch
+
 PACKAGE_ROOT = Path(__file__).resolve().parent
 PROJECT_ROOT = PACKAGE_ROOT.parent
 LEG_GYM_ROOT = PROJECT_ROOT / "legged_gym"
@@ -421,6 +423,14 @@ def main() -> None:
                                 "metrics/episode_reward_mean": wandb.summary.get("episode_reward_mean"),
                                 "metrics/episode_reward_last": wandb.summary.get("episode_reward_last"),
                             })
+
+            if hasattr(env, "close"):
+                try:
+                    env.close()
+                except Exception:
+                    pass
+            del env, ppo_runner
+            torch.cuda.empty_cache()
 
     wandb.agent(args.sweep_id, function=sweep_train, count=args.num_runs)
 

@@ -9,3 +9,5 @@ Lite3_rl_training/wandb/*
 !Lite3_rl_training/wandb/templates/
 Lite3_rl_training/wandb/templates/*
 !Lite3_rl_training/wandb/templates/*.json
+Lite3_rl_training/debug_training_obs/*.txt
+Lite3_rl_training/debug_training_obs/*.npz
