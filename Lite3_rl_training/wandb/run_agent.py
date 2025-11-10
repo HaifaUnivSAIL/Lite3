@@ -35,7 +35,8 @@ try:
     import isaacgym  # noqa: F401 - ensure isaacgym loads before torch
 except ImportError as exc:  # pragma: no cover - user guidance
     raise SystemExit(
-        "Failed to import isaacgym. Make sure the Isaac Gym python bindings are available."
+        "Failed to import isaacgym. Make sure the Isaac Gym python bindings are available.\n"
+        f"Underlying error: {exc}"
     ) from exc
 
 def _remove_path_entries(target: Path) -> List[Tuple[int, str]]:
