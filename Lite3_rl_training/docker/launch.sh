@@ -10,6 +10,35 @@ CONTAINER_NAME=lite3_rl_train_server
 
 MODE=${1:-headless}
 
+append_display_mounts() {
+  # X11 path: share DISPLAY + authority socket
+  if [[ -n "${DISPLAY}" ]]; then
+    DOCKER_ARGS+=(
+      -e DISPLAY="${DISPLAY}"
+      -v /tmp/.X11-unix:/tmp/.X11-unix:rw
+    )
+    local xa="${XAUTHORITY:-${HOME}/.Xauthority}"
+    if [[ -f "${xa}" ]]; then
+      DOCKER_ARGS+=(
+        -e XAUTHORITY="${xa}"
+        -v "${xa}:${xa}:ro"
+      )
+    fi
+  fi
+
+  # Wayland path: forward runtime dir sockets if available
+  if [[ -n "${WAYLAND_DISPLAY}" ]]; then
+    local runtime_dir="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
+    if [[ -S "${runtime_dir}/${WAYLAND_DISPLAY}" ]]; then
+      DOCKER_ARGS+=(
+        -e WAYLAND_DISPLAY="${WAYLAND_DISPLAY}"
+        -e XDG_RUNTIME_DIR=/tmp/xdg-runtime
+        -v "${runtime_dir}:/tmp/xdg-runtime:rw"
+      )
+    fi
+  fi
+}
+
 case "$MODE" in
   headless)
     echo "Mode:                Headless server (no GUI)"
@@ -26,11 +55,10 @@ case "$MODE" in
     DOCKER_ARGS=(
       --gpus all
       --runtime=nvidia
-      -e DISPLAY=${DISPLAY}
       -e NVIDIA_VISIBLE_DEVICES=all
       -e NVIDIA_DRIVER_CAPABILITIES=all
-      -v /tmp/.X11-unix:/tmp/.X11-unix:rw
     )
+    append_display_mounts
     ;;
   *)
     echo "Unknown mode: $MODE" >&2

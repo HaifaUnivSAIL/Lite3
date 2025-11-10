@@ -37,6 +37,11 @@ import random
 from legged_gym import LEGGED_GYM_ROOT_DIR, LEGGED_GYM_ENVS_DIR
 
 
+def _display_available() -> bool:
+    """Return True if a desktop session is available for the Isaac Gym viewer."""
+    return any(os.environ.get(var) for var in ("DISPLAY", "WAYLAND_DISPLAY", "MIR_SOCKET"))
+
+
 def class_to_dict(obj) -> dict:
     if not hasattr(obj, "__dict__"):
         return obj
@@ -194,6 +199,9 @@ def get_args():
     parser.add_argument('--slices', type=int, help='Number of client threads that process env slices')
 
     args = parser.parse_args()
+    if not args.headless and not _display_available():
+        print("[legged_gym] No display detected; enabling --headless to avoid GLFW viewer errors.")
+        args.headless = True
     return args
 
 

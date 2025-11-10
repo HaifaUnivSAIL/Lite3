@@ -79,7 +79,21 @@ if [[ -z "${SWEEP_ID}" ]]; then
     exit 1
 fi
 
-CMD=(python "${SCRIPT_DIR}/run_agent.py"
+PYTHON_BIN=""
+if [[ -n "${VIRTUAL_ENV:-}" && -x "${VIRTUAL_ENV}/bin/python" ]]; then
+    PYTHON_BIN="${VIRTUAL_ENV}/bin/python"
+elif [[ -n "${CONDA_PREFIX:-}" && -x "${CONDA_PREFIX}/bin/python" ]]; then
+    PYTHON_BIN="${CONDA_PREFIX}/bin/python"
+else
+    PYTHON_BIN="$(command -v python)"
+fi
+
+if [[ -z "${PYTHON_BIN}" ]]; then
+    echo "Error: could not locate a python executable." >&2
+    exit 1
+fi
+
+CMD=("${PYTHON_BIN}" "${SCRIPT_DIR}/run_agent.py"
     --sweep-id "${SWEEP_ID}"
     --config "${DEFAULT_CONFIG}"
     --task "${DEFAULT_TASK}"
@@ -97,5 +111,6 @@ if [[ ${#EXTRA_ARGS[@]} -gt 0 ]]; then
     CMD+=("${EXTRA_ARGS[@]}")
 fi
 
+echo "Using python: ${PYTHON_BIN}"
 echo "Running: ${CMD[*]}"
 "${CMD[@]}"
