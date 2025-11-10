@@ -10,8 +10,6 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
-import torch
-
 PACKAGE_ROOT = Path(__file__).resolve().parent
 PROJECT_ROOT = PACKAGE_ROOT.parent
 LEG_GYM_ROOT = PROJECT_ROOT / "legged_gym"
@@ -38,6 +36,8 @@ except ImportError as exc:  # pragma: no cover - user guidance
         "Failed to import isaacgym. Make sure the Isaac Gym python bindings are available.\n"
         f"Underlying error: {exc}"
     ) from exc
+
+import torch
 
 def _remove_path_entries(target: Path) -> List[Tuple[int, str]]:
     removed: List[Tuple[int, str]] = []
