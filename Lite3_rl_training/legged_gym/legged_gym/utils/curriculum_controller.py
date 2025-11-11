@@ -17,6 +17,7 @@ class CurriculumController:
         self.log_rewards = getattr(curriculum_cfg, "log_curriculum", False)
         self.front_touch_cfg = getattr(curriculum_cfg, "front_touch_termination", None)
         self.front_touch_enabled = False
+        self.current_goal_prob = None
 
     def get_progress_buf(self, buf_element):
         self.progress_buf = buf_element
@@ -29,7 +30,12 @@ class CurriculumController:
         if self.current_phase < len(self.phases) - 1 and \
                 avg_progress >= self.phases[self.current_phase]["trigger_thresh"]:
             self.current_phase +=1
-        self.current_scales = self.phases[self.current_phase]["reward_scales"]
+        phase_cfg = self.phases[self.current_phase]
+        self.current_scales = phase_cfg["reward_scales"]
+        if isinstance(phase_cfg, dict):
+            self.current_goal_prob = phase_cfg.get("near_goal_init_prob", None)
+        else:
+            self.current_goal_prob = getattr(phase_cfg, "near_goal_init_prob", None)
         active_names = self.current_scales.keys()
         self.current_functions = {self.reward_names[i]: f for i, f in enumerate(self.reward_functions) if self.reward_names[i] in active_names}
 
@@ -62,3 +68,6 @@ class CurriculumController:
 
     def front_touch_active(self):
         return self.front_touch_enabled
+
+    def get_goal_init_prob(self):
+        return self.current_goal_prob

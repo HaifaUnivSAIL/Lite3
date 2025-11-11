@@ -37,7 +37,7 @@ import numpy as np
 from isaacgym import gymtorch, gymapi, gymutil
 from isaacgym.torch_utils import (to_torch, quat_mul, quat_apply, torch_rand_float, tensor_clamp, scale, get_axis_params,
                                   quat_rotate_inverse)
-from legged_gym.utils.isaacgym_utils import compute_meshes_normals, Point, get_euler_xyz, get_contact_normals
+from legged_gym.utils.isaacgym_utils import compute_meshes_normals, Point, get_euler_xyz, get_contact_normals, quat_from_euler_xyz
 
 import torch
 from typing import Dict
@@ -77,6 +77,22 @@ class LeggedRobot(BaseTask):
         self._parse_cfg(self.cfg)
         super().__init__(self.cfg, sim_params, physics_engine, sim_device, headless)
 
+        raw_goal_prob = getattr(self.cfg.init_state, "near_goal_init_prob", 0.0)
+        self.goal_state_prob = float(raw_goal_prob) if raw_goal_prob is not None else 0.0
+        self.goal_state_prob = max(0.0, min(1.0, self.goal_state_prob))
+        self.goal_state_cfg = getattr(self.cfg.init_state, "near_goal_state", None)
+        self.goal_state_noise_cfg = getattr(self.cfg.init_state, "near_goal_noise", {}) or {}
+        self.goal_state_enabled = self.goal_state_prob > 0.0 and self.goal_state_cfg is not None
+        self.goal_root_state = None
+        self.goal_dof_pos = None
+        self.goal_state_noise = {
+            'pos': 0.0,
+            'rot': 0.0,
+            'lin_vel': 0.0,
+            'ang_vel': 0.0,
+            'joint': 0.0,
+        }
+
         if not self.headless:
             self.set_camera(self.cfg.viewer.pos, self.cfg.viewer.lookat)
         self._init_buffers()
@@ -93,6 +109,8 @@ class LeggedRobot(BaseTask):
         # ----------------------------------------------------------------------------------------------------------------- #
         self.front_touch_termination_active = False
         self.height_noise_mean = 0.
+        if self.goal_state_enabled:
+            print(f"[LeggedRobot] Near-goal spawn enabled with probability {self.goal_state_prob:.2f}")
 
         # load actuator network
         self.actuator_net = None
@@ -270,6 +288,8 @@ class LeggedRobot(BaseTask):
         """
         if len(env_ids) == 0:
             return
+        if not torch.is_tensor(env_ids):
+            env_ids = torch.tensor(env_ids, dtype=torch.long, device=self.device)
         # update curriculum
         if self.cfg.terrain.curriculum:
             self._update_terrain_curriculum(env_ids)
@@ -278,9 +298,10 @@ class LeggedRobot(BaseTask):
                                              self.max_episode_length == 0):
             self.update_command_curriculum(env_ids)
 
+        goal_env_ids = self._sample_goal_state_envs(env_ids)
         # reset robot states
-        self._reset_dofs(env_ids)
-        self._reset_root_states(env_ids)
+        self._reset_dofs(env_ids, goal_env_ids)
+        self._reset_root_states(env_ids, goal_env_ids)
         self.episode_v_integral[env_ids].zero_()
         self.episode_w_integral[env_ids].zero_()
         # self.pmtg.reset(env_ids)
@@ -385,6 +406,7 @@ class LeggedRobot(BaseTask):
             ## TODO - Here the update is done into the curriculum controller object, integrate the iteration number into it instead of progress_buff ##
 
             self.curriculum_controller.update()
+            self._update_goal_probability_from_curriculum()
             ## **Note - fetching attributes from curriculum controller object to env object - this is similar to using env object attr - they are sent in constructor to curr object.
             ## TODO - test that the reward names and scales are correct according to cfg file (two_leg_stand_config.py) and phase number (curriculum_controller state)
             for name, reward_function in self.curriculum_controller.current_functions.items():
@@ -768,28 +790,79 @@ class LeggedRobot(BaseTask):
             # exit(0)
         # return torch.clip(torques, -self.torque_limits, self.torque_limits)
 
-    def _reset_dofs(self, env_ids):
+    def _update_goal_probability_from_curriculum(self):
+        if not hasattr(self, "curriculum_controller"):
+            return
+        if not getattr(self.curriculum_controller, "enabled", False):
+            return
+        goal_prob = self.curriculum_controller.get_goal_init_prob()
+        if goal_prob is None:
+            return
+        self._set_goal_state_probability(goal_prob)
+
+    def _set_goal_state_probability(self, new_prob):
+        if new_prob is None or self.goal_state_cfg is None:
+            return
+        prob = float(new_prob)
+        prob = max(0.0, min(1.0, prob))
+        if abs(prob - self.goal_state_prob) < 1e-6:
+            return
+        previously_enabled = self.goal_state_enabled
+        self.goal_state_prob = prob
+        if self.goal_root_state is None:
+            self._init_goal_state_buffers()
+        self.goal_state_enabled = self.goal_state_prob > 0.0 and self.goal_state_cfg is not None
+        if self.goal_state_enabled and not previously_enabled:
+            print(f"[LeggedRobot] Near-goal spawn enabled with probability {self.goal_state_prob:.2f}")
+        elif not self.goal_state_enabled and previously_enabled:
+            print("[LeggedRobot] Near-goal spawn disabled by curriculum")
+
+    def _sample_goal_state_envs(self, env_ids: torch.Tensor) -> torch.Tensor:
+        """Pick a subset of envs that should spawn near the goal state."""
+        if not self.goal_state_enabled or env_ids.numel() == 0:
+            return env_ids.new_empty((0,), dtype=env_ids.dtype)
+        if self.goal_state_prob >= 1.0:
+            return env_ids.clone()
+        rand_vals = torch.rand(env_ids.shape[0], device=env_ids.device)
+        mask = rand_vals < self.goal_state_prob
+        if mask.any():
+            return env_ids[mask]
+        return env_ids.new_empty((0,), dtype=env_ids.dtype)
+
+    def _reset_dofs(self, env_ids, goal_env_ids=None):
         """ Resets DOF position and velocities of selected environmments
         Positions are randomly selected within 0.5:1.5 x default positions.
         Velocities are set to zero.
 
         Args:
             env_ids (List[int]): Environemnt ids
+            goal_env_ids (torch.Tensor, optional): env ids to be initialized near the goal state.
         """
         self.dof_pos[env_ids] = self.default_dof_pos * torch_rand_float(
             0.5, 1.5, (len(env_ids), self.num_dof), device=self.device)
+        if goal_env_ids is not None and self.goal_dof_pos is not None and goal_env_ids.numel() > 0:
+            goal_targets = self.goal_dof_pos.repeat(goal_env_ids.shape[0], 1)
+            joint_noise = self.goal_state_noise.get('joint', 0.0)
+            if joint_noise > 0.0:
+                noise = torch_rand_float(-joint_noise,
+                                         joint_noise,
+                                         (goal_env_ids.shape[0], self.num_dof),
+                                         device=self.device)
+                goal_targets = goal_targets + noise
+            self.dof_pos[goal_env_ids] = goal_targets
         self.dof_vel[env_ids] = 0.
 
         env_ids_int32 = env_ids.to(dtype=torch.int32)
         self.gym.set_dof_state_tensor_indexed(self.sim, gymtorch.unwrap_tensor(self.dof_state),
                                               gymtorch.unwrap_tensor(env_ids_int32), len(env_ids_int32))
 
-    def _reset_root_states(self, env_ids):
+    def _reset_root_states(self, env_ids, goal_env_ids=None):
         """ Resets ROOT states position and velocities of selected environmments
             Sets base position based on the curriculum
             Selects randomized base velocities within -0.5:0.5 [m/s, rad/s]
         Args:
             env_ids (List[int]): Environemnt ids
+            goal_env_ids (torch.Tensor, optional): env ids to be initialized near the goal state.
         """
         # base position
         if self.custom_origins:
@@ -803,6 +876,8 @@ class LeggedRobot(BaseTask):
         # base velocities
         self.root_states[env_ids, 7:13] = torch_rand_float(-0.5, 0.5, (len(env_ids), 6),
                                                            device=self.device)  # [7:10]: lin vel, [10:13]: ang vel
+        if goal_env_ids is not None and self.goal_root_state is not None and goal_env_ids.numel() > 0:
+            self._apply_goal_root_state(goal_env_ids)
         env_ids_int32 = env_ids.to(dtype=torch.int32)
         self.gym.set_actor_root_state_tensor_indexed(self.sim, gymtorch.unwrap_tensor(self.root_states),
                                                      gymtorch.unwrap_tensor(env_ids_int32), len(env_ids_int32))
@@ -822,6 +897,30 @@ class LeggedRobot(BaseTask):
             self.push_torques[:, 0, :] = torch_rand_float(-max_torque, max_torque, (self.num_envs, 3), device=self.device)
             self.gym.apply_rigid_body_force_tensors(self.sim, gymtorch.unwrap_tensor(self.push_forces),
                                                     gymtorch.unwrap_tensor(self.push_torques), gymapi.ENV_SPACE)
+
+    def _apply_goal_root_state(self, goal_env_ids):
+        """Overwrite root states for envs that should start near the goal pose."""
+        count = goal_env_ids.shape[0]
+        goal_states = self.goal_root_state.repeat(count, 1)
+        goal_states[:, :3] += self.env_origins[goal_env_ids]
+        pos_noise = self.goal_state_noise.get('pos', 0.0)
+        if pos_noise > 0.0:
+            goal_states[:, :3] += torch_rand_float(-pos_noise, pos_noise, (count, 3), device=self.device)
+        base_quat = goal_states[:, 3:7].clone()
+        rot_noise = self.goal_state_noise.get('rot', 0.0)
+        if rot_noise > 0.0:
+            noise_angles = torch_rand_float(-rot_noise, rot_noise, (count, 3), device=self.device)
+            noise_quat = quat_from_euler_xyz(noise_angles[:, 0], noise_angles[:, 1], noise_angles[:, 2])
+            base_quat = quat_mul(base_quat, noise_quat)
+            base_quat = base_quat / torch.norm(base_quat, dim=1, keepdim=True).clamp(min=1e-9)
+        goal_states[:, 3:7] = base_quat
+        lin_noise = self.goal_state_noise.get('lin_vel', 0.0)
+        if lin_noise > 0.0:
+            goal_states[:, 7:10] += torch_rand_float(-lin_noise, lin_noise, (count, 3), device=self.device)
+        ang_noise = self.goal_state_noise.get('ang_vel', 0.0)
+        if ang_noise > 0.0:
+            goal_states[:, 10:13] += torch_rand_float(-ang_noise, ang_noise, (count, 3), device=self.device)
+        self.root_states[goal_env_ids] = goal_states
 
     def _update_terrain_curriculum(self, env_ids):
         """ Implements the game-inspired curriculum.
@@ -1089,11 +1188,39 @@ class LeggedRobot(BaseTask):
                 if self.cfg.control.control_type in ["P", "V"]:
                     print(f"PD gain of joint {name} were not defined, setting them to zero")
         self.default_dof_pos = self.default_dof_pos.unsqueeze(0)
+        self._init_goal_state_buffers()
 
         self.original_obs_buf = torch.cat(
             (self.base_lin_acc, self.rpy, self.base_ang_vel, self.dof_pos, self.dof_vel, self.contact_filt),
             dim=-1)  # 3+3+3+12+12+4=37
         self.extras["episode"] = {}
+
+    def _init_goal_state_buffers(self):
+        """Prepare tensors for near-goal spawning."""
+        if self.goal_state_cfg is None:
+            self.goal_root_state = None
+            self.goal_dof_pos = None
+            return
+        goal_cfg = self.goal_state_cfg
+        pos = goal_cfg.get('pos', self.cfg.init_state.pos)
+        rot = goal_cfg.get('rot', self.cfg.init_state.rot)
+        lin_vel = goal_cfg.get('lin_vel', self.cfg.init_state.lin_vel)
+        ang_vel = goal_cfg.get('ang_vel', self.cfg.init_state.ang_vel)
+        root_state_list = list(pos) + list(rot) + list(lin_vel) + list(ang_vel)
+        self.goal_root_state = to_torch(root_state_list,
+                                        device=self.device,
+                                        requires_grad=False).unsqueeze(0)
+        goal_joint_angles = goal_cfg.get('default_joint_angles', self.cfg.init_state.default_joint_angles)
+        goal_dofs = torch.zeros(self.num_dof, dtype=torch.float, device=self.device, requires_grad=False)
+        for i, name in enumerate(self.dof_names):
+            goal_dofs[i] = goal_joint_angles.get(name, self.cfg.init_state.default_joint_angles[name])
+        self.goal_dof_pos = goal_dofs.unsqueeze(0)
+        default_noise = {'pos': 0.0, 'rot': 0.0, 'lin_vel': 0.0, 'ang_vel': 0.0, 'joint': 0.0}
+        for key in default_noise.keys():
+            value = self.goal_state_noise_cfg.get(key, default_noise[key])
+            if value is not None:
+                default_noise[key] = float(value)
+        self.goal_state_noise = default_noise
 
     def _init_custom_buffers(self):
         # initialize body properties
@@ -1550,10 +1677,31 @@ class LeggedRobot(BaseTask):
         return torch.sum(torch.square(self.base_ang_vel[:, :2]), dim=1)
 
     def _reward_orientation(self):
-        # Penalize non flat base orientation
-        return torch.sum(torch.square(self.projected_gravity[:, :2]) *
-                         torch.tensor([self.cfg.rewards.pitch_roll_factor], device=self.device),
-                         dim=1)
+        # Penalize deviation from the desired leaning pitch and level roll
+        target_pitch = getattr(self.cfg.rewards, "torso_upright_pitch_target", 0.0)
+        tolerance = max(getattr(self.cfg.rewards, "torso_upright_pitch_tolerance", 0.3), 1e-4)
+        pitch_error = (self.rpy[:, 1] - target_pitch) / tolerance
+        roll_error = self.rpy[:, 0]
+        weights = torch.tensor(self.cfg.rewards.pitch_roll_factor, device=self.device, dtype=self.dof_pos.dtype)
+        penalties = torch.stack((torch.square(pitch_error), torch.square(roll_error)), dim=1)
+        return torch.sum(penalties * weights, dim=1)
+
+    def _desired_pitch_params(self):
+        target = getattr(self.cfg.rewards, "torso_upright_pitch_target", 0.0)
+        tolerance = max(getattr(self.cfg.rewards, "torso_upright_pitch_tolerance", 0.3), 1e-4)
+        return target, tolerance
+
+    def _orientation_gate(self, pitch_width: float, roll_width: float):
+        target, tolerance = self._desired_pitch_params()
+        pitch_error = self.rpy[:, 1] - target
+        roll = self.rpy[:, 0]
+        pitch_den = max(pitch_width if pitch_width is not None else tolerance, 1e-4)
+        roll_den = max(roll_width if roll_width is not None else 0.2, 1e-4)
+        return torch.exp(-(torch.square(pitch_error) / pitch_den + torch.square(roll) / roll_den))
+
+    def _pitch_gate_width(self, scale: float = 1.0) -> float:
+        base_tol = getattr(self.cfg.rewards, "torso_upright_pitch_tolerance", 0.3)
+        return max((base_tol * scale) ** 2, 1e-4)
 
     def _reward_base_height(self):
         # Penalize base height away from target
@@ -1676,11 +1824,8 @@ class LeggedRobot(BaseTask):
 
     def _reward_torso_upright_soften(self):
         """Smooth upright reward that also considers roll and height."""
-        proj_g = self.projected_gravity
-        pitch_component = (-proj_g[:, 0] + 1.0) / 2.0
-        roll_component = 1.0 - torch.abs(proj_g[:, 1])
-        orientation_score = torch.clamp(pitch_component, 0.0, 1.0) * torch.clamp(roll_component, 0.0, 1.0)
-        orientation_score = torch.pow(orientation_score, 0.5)
+        pitch_tol = getattr(self.cfg.rewards, "reward_upright_tolerance", 0.35)
+        orientation_score = torch.pow(self._orientation_gate(pitch_tol ** 2, 0.2), 0.5)
 
         torso_upright = torch.sigmoid(4.0 * (orientation_score - 0.3))
 
@@ -1694,10 +1839,8 @@ class LeggedRobot(BaseTask):
 
     def _reward_torso_upright_warmup(self):
         """Early-stage upright reward with relaxed constraints."""
-        proj_g = self.projected_gravity
-        pitch_score = torch.clamp((-proj_g[:, 0] + 1.0) / 2.0, 0.0, 1.0)
-        roll_score = torch.clamp(1.0 - 0.5 * torch.abs(proj_g[:, 1]), 0.0, 1.0)
-        orientation_score = torch.pow(pitch_score * roll_score + 1e-5, 0.5)
+        pitch_tol = getattr(self.cfg.rewards, "reward_upright_tolerance", 0.35) * 1.5
+        orientation_score = torch.pow(self._orientation_gate(pitch_tol ** 2, 0.35) + 1e-5, 0.5)
 
         base_height = self.root_states[:, 2]
         height_gate = torch.clamp((base_height - 0.30) / 0.18, min=0.0, max=1.0)
@@ -1758,9 +1901,7 @@ class LeggedRobot(BaseTask):
             hind_hip_heights = self.root_states[:, 2]
         height_score = torch.clamp((hind_hip_heights - 0.30) / 0.12, min=0.0, max=1.0)
 
-        pitch = torch.abs(self.rpy[:, 1])
-        roll = torch.abs(self.rpy[:, 0])
-        orientation_gate = torch.exp(-(torch.square(pitch) + torch.square(roll)) / 0.25)
+        orientation_gate = self._orientation_gate(self._pitch_gate_width(1.2), 0.25)
 
         front_contact = torch.any(self.contact_filt[:, :2], dim=1)
         contact_gate = 1.0 - 0.5 * front_contact.to(self.dof_pos.dtype)
@@ -1810,9 +1951,7 @@ class LeggedRobot(BaseTask):
         front_contact = torch.any(self.contact_filt[:, :2], dim=1)
         front_clear_gate = (~front_contact).to(self.dof_pos.dtype)
 
-        pitch = torch.abs(self.rpy[:, 1])
-        roll = torch.abs(self.rpy[:, 0])
-        orientation_gate = torch.exp(-(torch.square(pitch) + torch.square(roll)) / 0.1)
+        orientation_gate = self._orientation_gate(self._pitch_gate_width(0.7), 0.1)
 
         base_height = self.root_states[:, 2]
         height_gate = torch.clamp((base_height - 0.35) / 0.2, min=0.0, max=1.0)
@@ -1851,10 +1990,11 @@ class LeggedRobot(BaseTask):
         return normalized
 
     def _reward_front_legs_up(self):
-        contacts = self.contact_filt  # shape [N, 4]
-        fl = contacts[:, 0]
-        fr = contacts[:, 1]
-        return 1.0 - (fl + fr).clamp(0, 1)  # 1 if both off, 0 if either touching
+        if self.front_feet_ids.numel() == 0:
+            return torch.zeros(self.num_envs, dtype=self.dof_pos.dtype, device=self.device)
+        contacts = self.contact_filt[:, self.front_feet_ids].to(self.dof_pos.dtype)
+        clear = 1.0 - contacts
+        return torch.prod(clear, dim=1)  # 1 only when both front legs are airborne
 
     def _reward_front_legs_up_continuous(self):
         """Reward sustained front-leg clearance with smooth motion."""
@@ -1877,9 +2017,7 @@ class LeggedRobot(BaseTask):
         vertical_speed = torch.abs(front_vel[:, :, 2]).mean(dim=1)
         velocity_gate = torch.exp(-5.0 * vertical_speed)
 
-        pitch = torch.abs(self.rpy[:, 1])
-        roll = torch.abs(self.rpy[:, 0])
-        orientation_gate = torch.exp(-(torch.square(pitch) + torch.square(roll)) / 0.1)
+        orientation_gate = self._orientation_gate(self._pitch_gate_width(0.7), 0.1)
 
         base_height = self.root_states[:, 2]
         height_gate = torch.clamp((base_height - 0.35) / 0.2, min=0.0, max=1.0)
@@ -1912,9 +2050,7 @@ class LeggedRobot(BaseTask):
         vertical_speed = torch.abs(front_vel[:, :, 2]).mean(dim=1)
         velocity_gate = torch.exp(-2.0 * vertical_speed)
 
-        pitch = torch.abs(self.rpy[:, 1])
-        roll = torch.abs(self.rpy[:, 0])
-        orientation_gate = torch.exp(-(torch.square(pitch) + torch.square(roll)) / 0.3)
+        orientation_gate = self._orientation_gate(self._pitch_gate_width(1.7), 0.3)
 
         base_height = self.root_states[:, 2]
         height_gate = torch.clamp((base_height - 0.30) / 0.15, min=0.0, max=1.0)
@@ -1923,6 +2059,23 @@ class LeggedRobot(BaseTask):
 
         base_score = 0.4 + 0.6 * duration_reward
         return both_up * base_score * velocity_gate * orientation_gate * height_gate * hind_support_gate * rotation_gate
+
+    def _reward_front_tap_penalty(self):
+        if self.front_feet_ids.numel() == 0:
+            return torch.zeros(self.num_envs, dtype=self.dof_pos.dtype, device=self.device)
+        contacts = self.contact_filt[:, self.front_feet_ids].to(self.dof_pos.dtype)
+        contact_rate = contacts.mean(dim=1)
+        front_body_indices = self.feet_indices[self.front_feet_ids]
+        front_vel = self.rigid_body_state[:, front_body_indices, 7:10]
+        tap_speed = torch.abs(front_vel[:, :, 2]).mean(dim=1)
+        return contact_rate + 0.25 * tap_speed
+
+    def _reward_base_height_bonus(self):
+        min_height = getattr(self.cfg.rewards, "base_height_bonus_threshold", 0.55)
+        max_height = getattr(self.cfg.rewards, "base_height_bonus_ceiling", 0.8)
+        base_height = self.root_states[:, 2]
+        bonus = torch.clamp((base_height - min_height) / max(max_height - min_height, 1e-4), min=0.0, max=1.0)
+        return bonus
 
     def _reward_foot_stillness(self):
         foot_velocities = self.root_states[:, 7:10]  # or use proper frame transform
@@ -1946,31 +2099,35 @@ class LeggedRobot(BaseTask):
             hind_support = torch.ones(self.num_envs, dtype=self.dof_pos.dtype, device=self.device)
         components.append(hind_support)
 
-        pitch = torch.abs(self.rpy[:, 1])
-        roll = torch.abs(self.rpy[:, 0])
-        orientation_gate = torch.exp(-(torch.square(pitch) + torch.square(roll)) / 0.12)
-        components.append(torch.clamp(orientation_gate, 0.0, 1.0))
+        orientation_gate = torch.clamp(self._orientation_gate(self._pitch_gate_width(0.6), 0.15), 0.0, 1.0)
+        components.append(orientation_gate)
 
         base_height = self.root_states[:, 2]
-        height_gate = torch.clamp((base_height - 0.35) / 0.2, min=0.0, max=1.0)
+        height_gate = torch.clamp((base_height - 0.45) / 0.25, min=0.0, max=1.0)
         components.append(height_gate)
 
         lin_speed = torch.norm(self.base_lin_vel[:, :2], dim=1)
-        lin_gate = torch.exp(-torch.square(lin_speed / 0.35))
+        lin_gate = torch.exp(-torch.square(lin_speed / 0.25))
         components.append(torch.clamp(lin_gate, 0.0, 1.0))
 
-        ang_speed = torch.norm(self.base_ang_vel, dim=1)
-        ang_gate = torch.exp(-torch.square(ang_speed / 1.2))
+        roll_yaw_speed = torch.norm(self.base_ang_vel[:, [0, 2]], dim=1)
+        ang_gate = torch.exp(-torch.square(roll_yaw_speed / 0.8))
         components.append(torch.clamp(ang_gate, 0.0, 1.0))
 
         if self.front_feet_ids.numel() > 0:
             front_body_indices = self.feet_indices[self.front_feet_ids]
             front_vel = self.rigid_body_state[:, front_body_indices, 7:10]
             vertical_speed = torch.abs(front_vel[:, :, 2]).mean(dim=1)
-            tapping_gate = torch.exp(-5.0 * vertical_speed)
-            components.append(torch.clamp(tapping_gate, 0.0, 1.0))
+            tapping_gate = torch.exp(-6.0 * vertical_speed)
+        else:
+            tapping_gate = torch.ones(self.num_envs, dtype=self.dof_pos.dtype, device=self.device)
+        components.append(torch.clamp(tapping_gate, 0.0, 1.0))
 
-        metric = torch.stack(components, dim=1).mean(dim=1)
+        weights = torch.tensor([0.35, 0.2, 0.18, 0.15, 0.07, 0.03, 0.02],
+                               dtype=self.dof_pos.dtype,
+                               device=self.device)
+        stacked = torch.stack(components, dim=1)
+        metric = torch.sum(stacked * weights, dim=1)
         return torch.clamp(metric, 0.0, 1.0)
 
     # def _reward_feet_height(self):

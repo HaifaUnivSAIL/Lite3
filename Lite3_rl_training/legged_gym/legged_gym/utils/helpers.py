@@ -120,6 +120,8 @@ def update_cfg_from_args(env_cfg, cfg_train, args):
         # num envs
         if args.num_envs is not None:
             env_cfg.env.num_envs = args.num_envs
+        if args.near_goal_init_prob is not None:
+            env_cfg.init_state.near_goal_init_prob = args.near_goal_init_prob
     if cfg_train is not None:
         if args.seed is not None:
             cfg_train.seed = args.seed
@@ -189,6 +191,8 @@ def get_args():
                         help="Random seed. Overrides config file if provided.")
     parser.add_argument("--max_iterations", type=int,
                         help="Maximum number of training iterations. Overrides config file if provided.")
+    parser.add_argument("--near_goal_init_prob", type=float, default=None,
+                        help="Probability to sample the initial state near the two-leg-stand goal pose.")
     parser.add_argument("--save_rewards", action="store_true", default=False,
                         help="Save every reward term to a csv file.")
     parser.add_argument("--physics_engine", type=str, default="physicsX")

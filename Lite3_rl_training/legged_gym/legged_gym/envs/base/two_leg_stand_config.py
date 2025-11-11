@@ -54,30 +54,36 @@ class TwoLegStandCfg(LeggedRobotCfg):
         base_height_target = 1
         still_all = True
         only_positive_rewards = True
-        pitch_roll_factor = [1.0, 1.0]  # still used by orientation reward
+        pitch_roll_factor = [0.2, 1.0]  # keep roll tight, relax pitch
 
         # Custom posture shaping params
         front_legs = ["FL", "FR"]
         rear_legs = ["HL", "HR"]
-        torso_upright_pitch_target = 0.0  # radians
-        torso_upright_pitch_tolerance = 0.3  # allow some lean
-        reward_upright_tolerance = 0.2
+        torso_upright_pitch_target = float(np.deg2rad(70.0))  # preferred lean-back
+        torso_upright_pitch_tolerance = float(np.deg2rad(25.0))
+        reward_upright_tolerance = float(np.deg2rad(22.0))
         front_foot_contact_penalty = -2.0
         foot_stillness_reward_weight = 1.0
+        base_height_bonus_threshold = 0.6
+        base_height_bonus_ceiling = 0.9
 
         class scales(LeggedRobotCfg.rewards.scales):
-            torso_upright = 3.0
-            front_legs_up_warmup = 1.0
-            human_posture_warmup = 1.0
-            torso_upright_soften = 1.0
-            torso_upright_warmup = 1.0
-            torso_upright_continuous = 2.0
-            human_posture = 1.0
-            front_legs_up = 1.0
-            base_height = -0.5
+            torso_upright = 4.5
+            front_legs_up_warmup = 3.0
+            human_posture_warmup = 1.8
+            torso_upright_soften = 1.8
+            torso_upright_warmup = 1.5
+            torso_upright_continuous = 4.8
+            human_posture = 3.5
+            front_legs_up = 3.0
             termination = -10.0
-            stand_still = 1.0
-            front_legs_up_continuous = 1.0 
+            stand_still = 0.15
+            front_legs_up_continuous = 6.0
+            base_height = -0.1
+            base_height_bonus = 1.5
+            hind_leg_extension_geom = 2.0
+            hind_knee_extension = 0.5
+            front_tap_penalty = -3.0
 
             # Disabled locomotion terms
             tracking_lin_vel = 0.0
@@ -105,46 +111,57 @@ class TwoLegStandCfg(LeggedRobotCfg):
                 log_enable = True
 
             phases = [
-                {
+                {  # Emphasize immediate front-leg lift-off
                     "name": "phase_0_legs_up_warmup",
                     "trigger_thresh": 500,
+                    "near_goal_init_prob": 0.0,
                     "reward_scales": {
-                        "front_legs_up_warmup": 10.0,
-                        "torso_upright_warmup": 1.0,
+                        "front_legs_up_warmup": 16.0,
+                        "torso_upright_warmup": 1.4,
+                        "front_tap_penalty": -6.0,
                         "termination": -10.0,
                     }
                 },
                 {
                     "name": "phase_0_basic",
                     "trigger_thresh": 1000,
+                    "near_goal_init_prob": 0.0,
                     "reward_scales": {
-                        "front_legs_up_warmup": 5.0,
-                        "human_posture_warmup": 2.0,
-                        "torso_upright_warmup": 1.0,
-                        "stand_still": 0.25,
+                        "front_legs_up_warmup": 8.0,
+                        "human_posture_warmup": 3.5,
+                        "torso_upright_warmup": 1.5,
+                        "stand_still": 0.1,
+                        "front_tap_penalty": -6.0,
                         "termination": -10.0,
                     }
                 },
                 {
                     "name": "phase_1_posture_alignment",
                     "trigger_thresh": 1500,
+                    "near_goal_init_prob": 0.1,
                     "reward_scales": {
-                        "human_posture": 3.0,
-                        "front_legs_up_continuous": 10.0,
-                        "torso_upright_continuous": 3.0,
-                        "stand_still": 0.3,
+                        "human_posture": 5.0,
+                        "front_legs_up_continuous": 15.0,
+                        "torso_upright_continuous": 5.0,
+                        "hind_leg_extension_geom": 3.5,
+                        "stand_still": 0.1,
+                        "base_height_bonus": 1.8,
                         "termination": -10.0,
                     }
                 },
                 {
                     "name": "phase_2_fine_standing",
                     "trigger_thresh": 2000,
+                    "near_goal_init_prob": 0.2,
                     "reward_scales": {
-                        "human_posture": 5.0,
-                        "front_legs_up_continuous": 4.0,
-                        "torso_upright_continuous": 3.0,
+                        "human_posture": 6.0,
+                        "front_legs_up_continuous": 20.0,
+                        "torso_upright_continuous": 5.5,
+                        "hind_leg_extension_geom": 4.5,
+                        "base_height_bonus": 2.0,
                         "termination": -10.0,
-                        "stand_still": 0.35
+                        "stand_still": 0.05,
+                        "front_tap_penalty": -7.0
                     }
                 }
             ]

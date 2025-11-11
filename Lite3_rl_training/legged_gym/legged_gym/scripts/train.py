@@ -21,6 +21,9 @@ def train(args):
     env_cfg, train_cfg = task_registry.get_cfgs(name=args.task)
     # override some parameters for training
     env_cfg.commands.fixed_commands = None
+    if args.near_goal_init_prob is not None:
+        env_cfg.init_state.near_goal_init_prob = min(
+            max(args.near_goal_init_prob, 0.0), 1.0)
 
     # prepare environment
     env, env_cfg = task_registry.make_env(name=args.task, args=args, env_cfg=env_cfg)

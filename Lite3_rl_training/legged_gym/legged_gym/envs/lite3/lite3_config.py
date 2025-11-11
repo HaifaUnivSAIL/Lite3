@@ -1,4 +1,7 @@
+from copy import deepcopy
+
 from legged_gym.envs.base.legged_robot_config import LeggedRobotCfg, LeggedRobotCfgPPO
+from legged_gym.envs.base.two_leg_stand_config import TwoLegStandCfg
 
 
 class Lite3RoughCfg(LeggedRobotCfg):
@@ -19,6 +22,21 @@ class Lite3RoughCfg(LeggedRobotCfg):
             'HL_Knee_joint': 1.8,    # [rad]
             'FR_Knee_joint': 1.8,  # [rad]
             'HR_Knee_joint': 1.8,    # [rad]
+        }
+        near_goal_init_prob = 0.0
+        near_goal_state = {
+            'pos': deepcopy(TwoLegStandCfg.init_state.pos),
+            'rot': deepcopy(TwoLegStandCfg.init_state.rot),
+            'lin_vel': deepcopy(TwoLegStandCfg.init_state.lin_vel),
+            'ang_vel': deepcopy(TwoLegStandCfg.init_state.ang_vel),
+            'default_joint_angles': deepcopy(TwoLegStandCfg.init_state.default_joint_angles),
+        }
+        near_goal_noise = {
+            'pos': 0.03,
+            'rot': 0.08,
+            'lin_vel': 0.1,
+            'ang_vel': 0.1,
+            'joint': 0.08,
         }
 
     class env(LeggedRobotCfg.env):
