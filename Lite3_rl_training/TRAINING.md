@@ -86,3 +86,15 @@ Notes:
 4. Use `play.py` with the same checkpoint to visually sanity-check the behavior or to force continuous near-goal spawning for qualitative review.
 
 Feel free to append more “known-good” command snippets here whenever you introduce new experiments or automation helpers.***
+
+## One-Command Replay / Resume (Generated Scripts)
+
+Every training run now drops two helper scripts into its log directory. The “run folder” here means the path `legged_gym/logs/<experiment_name>/<run_name>` that `train.py` created (the same place `env_cfg.json` lives). Change into that folder and run:
+
+- `./run_play.sh [--headless] [--checkpoint model_XXXX.pt]`  
+  Replays the run with `play.py` using the correct `--task` and `--load_run`. Defaults to the latest checkpoint. Add `--headless` to suppress the viewer.
+
+- `./run_resume.sh [--checkpoint model_XXXX.pt]`  
+  Resumes training headlessly from the specified (or latest) checkpoint for that run. Task and run path are prefilled, so you only choose the checkpoint.
+
+Both scripts are made executable automatically during training startup and use repo-relative paths, so they won’t hit “file not found” as long as you launch them from inside the run’s log directory.***

@@ -1964,7 +1964,7 @@ class LeggedRobot(BaseTask):
         guard = front_clear_gate * orientation_gate * height_gate * velocity_gate
         return guard
     
-    def _reward_hind_leg_extension_geom(self):
+    def _reward_hind_leg_extension_geom_backup(self):
         # Indices based on your printout
         hl_hip_idx = 9
         hl_foot_idx = 12
@@ -1988,6 +1988,61 @@ class LeggedRobot(BaseTask):
         normalized = torch.clamp(leg_length / 0.4, 0.0, 1.0)
 
         return normalized
+
+    def _reward_hind_leg_extension_geom(self):
+        """Reward straight, weight-bearing hind legs with vertical alignment.
+
+        Combines leg length with a vertical alignment factor and soft penalties
+        on horizontal splay and angular velocity. Requires both hind feet in
+        contact to grant the reward.
+        """
+        # Body indices
+        hl_hip_idx = 9
+        hl_foot_idx = 12
+        hr_hip_idx = 13
+        hr_foot_idx = 16
+
+        # World-frame hip and foot positions
+        hl_hip_pos = self.rigid_body_state[:, hl_hip_idx, :3]
+        hl_foot_pos = self.rigid_body_state[:, hl_foot_idx, :3]
+        hr_hip_pos = self.rigid_body_state[:, hr_hip_idx, :3]
+        hr_foot_pos = self.rigid_body_state[:, hr_foot_idx, :3]
+
+        # Hip->foot vectors
+        v_hl = hl_foot_pos - hl_hip_pos
+        v_hr = hr_foot_pos - hr_hip_pos
+
+        # Lengths and normalization vs. nominal max (approx 0.4 m hip-to-toe)
+        L_hl = torch.norm(v_hl, dim=1)
+        L_hr = torch.norm(v_hr, dim=1)
+        length_norm = torch.clamp((L_hl + L_hr) * 0.5 / 0.4, 0.0, 1.0)
+
+        # Vertical alignment: reward pointing downward (vz > 0), taper to zero if horizontal
+        L_stack = torch.stack((L_hl, L_hr), dim=1) + 1e-6
+        vz = torch.stack((v_hl[:, 2], v_hr[:, 2]), dim=1)
+        align = torch.clamp(vz / L_stack, 0.0, 1.0).mean(dim=1)
+
+        # Horizontal splay penalty: discourage very long, horizontal legs
+        horiz = torch.stack((torch.norm(v_hl[:, :2], dim=1), torch.norm(v_hr[:, :2], dim=1)), dim=1).mean(dim=1)
+        horiz_gate = torch.exp(-2.0 * torch.square(horiz))
+
+        # Hind support requirement
+        if self.hind_feet_ids.numel() > 0:
+            hind_contacts = torch.all(self.contact_filt[:, self.hind_feet_ids], dim=1)
+            hind_support_gate = hind_contacts.to(self.dof_pos.dtype)
+        else:
+            hind_support_gate = torch.ones(self.num_envs, dtype=self.dof_pos.dtype, device=self.device)
+
+        # Mild angular velocity gate to avoid rewarding during rapid toppling
+        roll_yaw_speed = torch.norm(self.base_ang_vel[:, [0, 2]], dim=1)
+        ang_gate = torch.exp(-torch.square(roll_yaw_speed / 1.0))
+
+        # Optional base height encouragement (soft)
+        base_height = self.root_states[:, 2]
+        height_gate = torch.clamp((base_height - 0.45) / 0.2, min=0.0, max=1.0)
+
+        reward = length_norm * align * horiz_gate * hind_support_gate * ang_gate * height_gate
+        return reward
 
     def _reward_front_legs_up(self):
         if self.front_feet_ids.numel() == 0:
@@ -2084,35 +2139,27 @@ class LeggedRobot(BaseTask):
 
     def _compute_two_leg_stand_metric(self):
         """Compute a normalized stability metric for upright two-leg standing."""
-        components = []
-
         if self.front_feet_ids.numel() > 0:
             front_contact = torch.any(self.contact_filt[:, self.front_feet_ids], dim=1)
             front_clear = (~front_contact).to(self.dof_pos.dtype)
         else:
             front_clear = torch.ones(self.num_envs, dtype=self.dof_pos.dtype, device=self.device)
-        components.append(front_clear)
 
         if self.hind_feet_ids.numel() > 0:
             hind_support = torch.all(self.contact_filt[:, self.hind_feet_ids], dim=1).to(self.dof_pos.dtype)
         else:
             hind_support = torch.ones(self.num_envs, dtype=self.dof_pos.dtype, device=self.device)
-        components.append(hind_support)
 
         orientation_gate = torch.clamp(self._orientation_gate(self._pitch_gate_width(0.6), 0.15), 0.0, 1.0)
-        components.append(orientation_gate)
 
         base_height = self.root_states[:, 2]
         height_gate = torch.clamp((base_height - 0.45) / 0.25, min=0.0, max=1.0)
-        components.append(height_gate)
 
         lin_speed = torch.norm(self.base_lin_vel[:, :2], dim=1)
         lin_gate = torch.exp(-torch.square(lin_speed / 0.25))
-        components.append(torch.clamp(lin_gate, 0.0, 1.0))
 
         roll_yaw_speed = torch.norm(self.base_ang_vel[:, [0, 2]], dim=1)
         ang_gate = torch.exp(-torch.square(roll_yaw_speed / 0.8))
-        components.append(torch.clamp(ang_gate, 0.0, 1.0))
 
         if self.front_feet_ids.numel() > 0:
             front_body_indices = self.feet_indices[self.front_feet_ids]
@@ -2121,13 +2168,12 @@ class LeggedRobot(BaseTask):
             tapping_gate = torch.exp(-6.0 * vertical_speed)
         else:
             tapping_gate = torch.ones(self.num_envs, dtype=self.dof_pos.dtype, device=self.device)
-        components.append(torch.clamp(tapping_gate, 0.0, 1.0))
 
-        weights = torch.tensor([0.35, 0.2, 0.18, 0.15, 0.07, 0.03, 0.02],
-                               dtype=self.dof_pos.dtype,
-                               device=self.device)
-        stacked = torch.stack(components, dim=1)
-        metric = torch.sum(stacked * weights, dim=1)
+        # Multiplicative gates: zero if front feet touch or hind feet are off, scale with height/align/speed/quiet front motion.
+        metric = front_clear * hind_support
+        metric = metric * orientation_gate * height_gate
+        metric = metric * torch.clamp(lin_gate, 0.0, 1.0) * torch.clamp(ang_gate, 0.0, 1.0)
+        metric = metric * torch.clamp(tapping_gate, 0.0, 1.0)
         return torch.clamp(metric, 0.0, 1.0)
 
     # def _reward_feet_height(self):

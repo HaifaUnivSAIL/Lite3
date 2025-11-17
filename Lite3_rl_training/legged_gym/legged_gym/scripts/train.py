@@ -10,6 +10,7 @@ import numpy as np
 import json
 from datetime import datetime
 import isaacgym
+import shutil
 from legged_gym.envs import *
 from legged_gym.utils import get_args, Logger, register
 from legged_gym.utils.task_registry import task_registry
@@ -34,9 +35,62 @@ def train(args):
         env=env, name=args.task, args=args, train_cfg=train_cfg,
         enable_summary_writer=True)
 
+    # if this is a fresh run and a previous run folder exists, wipe it
+    if not train_cfg.runner.resume and os.path.isdir(ppo_runner.log_dir):
+        shutil.rmtree(ppo_runner.log_dir)
+
     # record configs as log files
-    if not os.path.exists(ppo_runner.log_dir):
-        os.mkdir(ppo_runner.log_dir)
+    os.makedirs(ppo_runner.log_dir, exist_ok=True)
+    # drop a helper script to replay this run easily
+    logs_root = os.path.join(os.path.dirname(os.path.dirname(currentdir)), "logs")
+    try:
+        rel_load_run = os.path.relpath(ppo_runner.log_dir, logs_root)
+    except Exception:
+        rel_load_run = ppo_runner.log_dir
+    run_play_path = os.path.join(ppo_runner.log_dir, "run_play.sh")
+    run_resume_path = os.path.join(ppo_runner.log_dir, "run_resume.sh")
+    play_cmd = f"""#!/usr/bin/env bash
+set -euo pipefail
+
+HEADLESS_FLAG=""
+CHECKPOINT="-1"
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --headless) HEADLESS_FLAG="--headless"; shift ;;
+    --checkpoint) CHECKPOINT="$2"; shift 2 ;;
+    *) echo "Unknown arg: $1"; exit 1 ;;
+  esac
+done
+
+python legged_gym/legged_gym/scripts/play.py \\
+  --task {args.task} \\
+  --load_run {rel_load_run} \\
+  --checkpoint "${{CHECKPOINT}}" \\
+  $HEADLESS_FLAG
+"""
+    resume_cmd = f"""#!/usr/bin/env bash
+set -euo pipefail
+
+CHECKPOINT="-1"
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --checkpoint) CHECKPOINT="$2"; shift 2 ;;
+    *) echo "Unknown arg: $1"; exit 1 ;;
+  esac
+done
+
+# Always headless for resume scripts
+python legged_gym/legged_gym/scripts/train.py \\
+  --task {args.task} \\
+  --resume \\
+  --load_run {rel_load_run} \\
+  --checkpoint "${{CHECKPOINT}}" \\
+  --headless
+"""
+    for path, content in [(run_play_path, play_cmd), (run_resume_path, resume_cmd)]:
+        with open(path, "w") as fp:
+            fp.write(content)
+        os.chmod(path, 0o755)
     with open(os.path.join(ppo_runner.log_dir, 'env_cfg.json'), 'w') as fp:
         json.dump(class_to_dict(env_cfg), fp)
     with open(os.path.join(ppo_runner.log_dir, 'train_cfg.json'), 'w') as fp:

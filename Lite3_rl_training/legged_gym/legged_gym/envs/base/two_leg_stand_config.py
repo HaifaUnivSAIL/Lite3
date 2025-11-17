@@ -102,16 +102,16 @@ class TwoLegStandCfg(LeggedRobotCfg):
             front_legs_up_warmup = 3.0
             human_posture_warmup = 1.8
             torso_upright_soften = 1.8
-            torso_upright_warmup = 1.5
-            torso_upright_continuous = 4.8
-            human_posture = 3.5
-            front_legs_up = 3.0
+            torso_upright_warmup = 1.8
+            torso_upright_continuous = 7.0
+            human_posture = 5.0
+            front_legs_up = 2.5
             termination = -10.0
             stand_still = 0.15
-            front_legs_up_continuous = 6.0
+            front_legs_up_continuous = 5.5
             base_height = -0.1
             base_height_bonus = 1.5
-            hind_leg_extension_geom = 2.0
+            hind_leg_extension_geom = 1.0
             hind_knee_extension = 0.5
             front_tap_penalty = -3.0
 
@@ -168,30 +168,30 @@ class TwoLegStandCfg(LeggedRobotCfg):
                 {
                     "name": "phase_1_posture_alignment",
                     "trigger_thresh": 1500,
-                    "near_goal_init_prob": 0.1,
+                    "near_goal_init_prob": 0.45,
                     "reward_scales": {
-                        "human_posture": 5.0,
-                        "front_legs_up_continuous": 15.0,
-                        "torso_upright_continuous": 5.0,
-                        "hind_leg_extension_geom": 3.5,
+                        "human_posture": 6.0,
+                        "front_legs_up_continuous": 12.0,
+                        "torso_upright_continuous": 8.0,
+                        "hind_leg_extension_geom": 2.0,
                         "stand_still": 0.1,
-                        "base_height_bonus": 1.8,
+                        "base_height_bonus": 2.0,
                         "termination": -10.0,
                     }
                 },
                 {
                     "name": "phase_2_fine_standing",
                     "trigger_thresh": 2000,
-                    "near_goal_init_prob": 0.2,
+                    "near_goal_init_prob": 0.7,
                     "reward_scales": {
-                        "human_posture": 6.0,
-                        "front_legs_up_continuous": 20.0,
-                        "torso_upright_continuous": 5.5,
-                        "hind_leg_extension_geom": 4.5,
-                        "base_height_bonus": 2.0,
+                        "human_posture": 7.5,
+                        "front_legs_up_continuous": 14.0,
+                        "torso_upright_continuous": 10.0,
+                        "hind_leg_extension_geom": 2.5,
+                        "base_height_bonus": 2.2,
                         "termination": -10.0,
                         "stand_still": 0.05,
-                        "front_tap_penalty": -7.0
+                        "front_tap_penalty": -7.5
                     }
                 }
             ]
