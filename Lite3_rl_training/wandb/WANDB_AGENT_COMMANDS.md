@@ -22,7 +22,7 @@ The launcher automatically reads the key file when
 ```bash
 nohup ./wandb/run_agent.sh \
   --sweep-id <SWEEP_ID> \
-  --num-runs 1 \
+  --num-runs 100 \
   --rl-device cuda:0 \
   --sim-device cuda:0 \
   --physics-engine physicsX \
@@ -35,7 +35,7 @@ nohup ./wandb/run_agent.sh \
 
 ```bash
 nohup ./wandb/run_agent.sh \
-  --sweep-id <SWEEP_ID> \
+  --sweep-id HaifaUnivSAIL/Lite3/aq97ckob \
   --num-runs 100 \
   --rl-device cuda:1 \
   --sim-device cuda:1 \
