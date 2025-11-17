@@ -1,3 +1,5 @@
+from copy import deepcopy
+
 import numpy as np
 from legged_gym.envs.base.legged_robot_config import LeggedRobotCfg, LeggedRobotCfgPPO
 
@@ -19,6 +21,34 @@ class TwoLegStandCfg(LeggedRobotCfg):
             'HR_HipY_joint': -0.767203,
             'HL_Knee_joint': 1.54788,
             'HR_Knee_joint': 1.54679,
+        }
+        near_goal_init_prob = 0.0
+        near_goal_state = {
+            'pos': [0.0, 0.0, 0.62],
+            'rot': [0.0, 0.5372996083468239, 0.0, 0.8433914458128857],  # roll=0, pitch=65deg, yaw=0
+            'lin_vel': [0.0, 0.0, 0.0],
+            'ang_vel': [0.0, 0.0, 0.0],
+            'default_joint_angles': {
+                'FL_HipX_joint': -0.02,
+                'FR_HipX_joint': 0.02,
+                'HL_HipX_joint': -0.03,
+                'HR_HipX_joint': 0.03,
+                'FL_HipY_joint': 0.2,
+                'FR_HipY_joint': 0.2,
+                'HL_HipY_joint': -1.25,
+                'HR_HipY_joint': -1.25,
+                'FL_Knee_joint': 2.35,
+                'FR_Knee_joint': 2.35,
+                'HL_Knee_joint': 0.65,
+                'HR_Knee_joint': 0.65,
+            },
+        }
+        near_goal_noise = {
+            'pos': 0.02,
+            'rot': 0.08,
+            'lin_vel': 0.08,
+            'ang_vel': 0.08,
+            'joint': 0.08,
         }
 
     class env(LeggedRobotCfg.env):
