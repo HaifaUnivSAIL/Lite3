@@ -42,18 +42,21 @@ def train(args):
     # record configs as log files
     os.makedirs(ppo_runner.log_dir, exist_ok=True)
     # drop a helper script to replay this run easily
-    logs_root = os.path.join(os.path.dirname(os.path.dirname(currentdir)), "logs")
-    try:
-        rel_load_run = os.path.relpath(ppo_runner.log_dir, logs_root)
-    except Exception:
-        rel_load_run = ppo_runner.log_dir
+    run_dir_abs = os.path.abspath(ppo_runner.log_dir)
     run_play_path = os.path.join(ppo_runner.log_dir, "run_play.sh")
     run_resume_path = os.path.join(ppo_runner.log_dir, "run_resume.sh")
+    exp_name = os.path.basename(os.path.dirname(run_dir_abs))
+    run_name = os.path.basename(run_dir_abs)
+
     play_cmd = f"""#!/usr/bin/env bash
 set -euo pipefail
+# Resolve repo/log roots relative to this run directory
+THIS_DIR="$(cd -- "$(dirname "$0")" >/dev/null 2>&1 && pwd)"
+LOGS_ROOT="$(cd "$THIS_DIR/../.." && pwd)"
+REPO_ROOT="$(cd "$LOGS_ROOT/.." && pwd)"
 
 HEADLESS_FLAG=""
-CHECKPOINT="-1"
+CHECKPOINT=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --headless) HEADLESS_FLAG="--headless"; shift ;;
@@ -61,30 +64,46 @@ while [[ $# -gt 0 ]]; do
     *) echo "Unknown arg: $1"; exit 1 ;;
   esac
 done
+CKPT_FLAG=""
+if [[ -n "$CHECKPOINT" ]]; then
+  CKPT_FLAG="--checkpoint $CHECKPOINT"
+fi
 
-python legged_gym/legged_gym/scripts/play.py \\
+python "$REPO_ROOT/legged_gym/scripts/play.py" \\
   --task {args.task} \\
-  --load_run {rel_load_run} \\
-  --checkpoint "${{CHECKPOINT}}" \\
+  --experiment_name "{exp_name}" \\
+  --run_name "{run_name}" \\
+  --load_run "{run_name}" \\
+  $CKPT_FLAG \\
   $HEADLESS_FLAG
 """
     resume_cmd = f"""#!/usr/bin/env bash
 set -euo pipefail
+# Resolve repo/log roots relative to this run directory
+THIS_DIR="$(cd -- "$(dirname "$0")" >/dev/null 2>&1 && pwd)"
+LOGS_ROOT="$(cd "$THIS_DIR/../.." && pwd)"
+REPO_ROOT="$(cd "$LOGS_ROOT/.." && pwd)"
 
-CHECKPOINT="-1"
+CHECKPOINT=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --checkpoint) CHECKPOINT="$2"; shift 2 ;;
     *) echo "Unknown arg: $1"; exit 1 ;;
   esac
 done
+CKPT_FLAG=""
+if [[ -n "$CHECKPOINT" ]]; then
+  CKPT_FLAG="--checkpoint $CHECKPOINT"
+fi
 
 # Always headless for resume scripts
-python legged_gym/legged_gym/scripts/train.py \\
+python "$REPO_ROOT/legged_gym/scripts/train.py" \\
   --task {args.task} \\
   --resume \\
-  --load_run {rel_load_run} \\
-  --checkpoint "${{CHECKPOINT}}" \\
+  --experiment_name "{exp_name}" \\
+  --run_name "{run_name}" \\
+  --load_run "{run_name}" \\
+  $CKPT_FLAG \\
   --headless
 """
     for path, content in [(run_play_path, play_cmd), (run_resume_path, resume_cmd)]:

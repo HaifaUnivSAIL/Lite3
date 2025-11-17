@@ -215,7 +215,7 @@ class OnPolicyRunner:
                     writer = csv.writer(f)
                     writer.writerow(self.csv_header)
                     self.exported_path = os.path.join(self.log_dir, 'exported')
-                    os.mkdir(self.exported_path)
+                    os.makedirs(self.exported_path, exist_ok=True)
             reward_row = []
             for key in locs['ep_infos'][0]:  # each reward terms
                 infotensor = torch.tensor([], device=self.device)
