@@ -11,5 +11,6 @@ Lite3_rl_training/wandb/wandb-api-key-file
 !Lite3_rl_training/wandb/templates/
 Lite3_rl_training/wandb/templates/*
 !Lite3_rl_training/wandb/templates/*.json
-Lite3_rl_training/debug_training_obs/*.txt
-Lite3_rl_training/debug_training_obs/*.npz
+!Lite3_rl_training/debug_training_obs/*.py
+Lite3_rl_training/debug_training_obs
+
