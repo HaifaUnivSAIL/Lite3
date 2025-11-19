@@ -1704,17 +1704,8 @@ class LeggedRobot(BaseTask):
         return max((base_tol * scale) ** 2, 1e-4)
 
     def _reward_base_height(self):
-        # Penalize base height away from target
-        # # is_stance = ~self.pmtg.is_swing
-        # is_stance = self.contact_filt
-        # # stance_leg_num = is_stance.sum(dim=1)
-        # contact_feet_height = self.rigid_body_state[:, self.feet_indices, 2] * is_stance
-        # contact_shoulder_height = self.rigid_body_state[:, self.shoulder_indices, 2] * is_stance
-        # contact_leg_height_z = contact_shoulder_height - contact_feet_height
-        # rew = torch.sum(torch.abs(self.cfg.rewards.base_height_target - contact_leg_height_z) * is_stance, dim=1)
-        # return rew
-        base_height = self.root_states[:, 2]
-        return torch.square(base_height - self.cfg.rewards.base_height_target)
+        # No penalty term; base height encouragement handled via bonus terms.
+        return torch.zeros(self.num_envs, dtype=self.dof_pos.dtype, device=self.device)
 
     def _reward_torques(self):
         # Penalize torques
@@ -1723,6 +1714,11 @@ class LeggedRobot(BaseTask):
     def _reward_dof_vel(self):
         # Penalize dof velocities
         return torch.sum(torch.square(self.dof_vel), dim=1)
+
+    def _reward_torque_energy(self):
+        """Approximate minimum-energy usage by penalizing the instantaneous squared actuator effort."""
+        torque_energy = torch.sum(self.torques * self.torques, dim=1)
+        return torch.exp(-0.5 * torque_energy)
 
     def _reward_dof_acc(self):
         # Penalize dof accelerations
@@ -1802,24 +1798,44 @@ class LeggedRobot(BaseTask):
             body_lin_motion = torch.norm(self.base_lin_vel[:, :2], dim=1)
             body_ang_motion = torch.norm(self.base_ang_vel[:, [0, 2]], dim=1)
 
-            motion_metric = 1.5 * joint_deviation + 0.5 * body_lin_motion + 0.8 * body_ang_motion
+            motion_metric = 1.5 * joint_deviation + body_lin_motion + 0.5 * body_ang_motion
             return torch.exp(-motion_metric)
+
+    def _reward_stand_still_roll_only(self):
+        """Reward keeping roll rate low (used for rotational damping)."""
+        roll_rate = torch.abs(self.base_ang_vel[:, 0])
+        return torch.exp(-1.0 * roll_rate)
+
+    def _reward_stand_still_yaw_only(self):
+        """Reward keeping yaw rate low."""
+        yaw_rate = torch.abs(self.base_ang_vel[:, 2])
+        return torch.exp(-0.5 * yaw_rate)
+
+    def _reward_stand_still_lin_x(self):
+        """Reward keeping base velocity along x low."""
+        lin_x = torch.abs(self.base_lin_vel[:, 0])
+        return torch.exp(-1.0 * lin_x)
+
+    def _reward_stand_still_lin_y(self):
+        """Reward keeping base velocity along y low."""
+        lin_y = torch.abs(self.base_lin_vel[:, 1])
+        return torch.exp(-1.0 * lin_y)
+
+    def _reward_stand_still_lin_z(self):
+        """Reward keeping vertical velocity low (prevents hopping)."""
+        lin_z = torch.abs(self.base_lin_vel[:, 2])
+        return torch.exp(-0.8 * lin_z)
         
     def _reward_torso_upright(self):
         """
         Rewards the robot for aligning its torso X-axis (forward direction)
-        with the world Z-axis (upward).
-        This is equivalent to encouraging a rotation of +90 degrees around Y,
-        i.e., quaternion [0, 0.7071, 0, 0.7071].
+        with the world Z-axis (upward). Use projected gravity to measure how
+        much the body +Z aligns with world +Z (gravity points -Z).
         """
-        # The projected_gravity is the gravity vector expressed in the base frame
-        # So aligning the X-axis with world Z means gravity should point along -X
-        # i.e., projected_gravity[:, 0] should be close to -1.0
-
-        alignment = -self.projected_gravity[:, 0]  # Want this to be +1.0 when upright
-        reward = alignment.clamp(min=0.0)  # Only positive alignment is rewarded
-        # print(f"%%%%%%%%%%%%%%%%%%%%%%% torso upright function is called. All scales are named including the new ones.")
-        # reward = torch.where(reward >= 0.5, reward, torch.zeros_like(reward))  # Threshold for reward
+        # projected_gravity is gravity in the base frame; when upright,
+        # it should align with -Z of the body, making projected_gravity[:, 2] close to -1.
+        alignment = -self.projected_gravity[:, 2]  # +1 when torso z-axis points up
+        reward = alignment.clamp(min=0.0)  # Only reward correct-up alignment
         return reward
 
     def _reward_torso_upright_soften(self):
@@ -1843,7 +1859,7 @@ class LeggedRobot(BaseTask):
         orientation_score = torch.pow(self._orientation_gate(pitch_tol ** 2, 0.35) + 1e-5, 0.5)
 
         base_height = self.root_states[:, 2]
-        height_gate = torch.clamp((base_height - 0.30) / 0.18, min=0.0, max=1.0)
+        height_gate = torch.clamp((base_height - 0.25) / 0.25, min=0.0, max=1.0)
 
         front_contact = torch.any(self.contact_filt[:, :2], dim=1)
         contact_gate = 1.0 - 0.25 * front_contact.to(self.dof_pos.dtype)
@@ -1901,21 +1917,14 @@ class LeggedRobot(BaseTask):
             hind_hip_heights = self.root_states[:, 2]
         height_score = torch.clamp((hind_hip_heights - 0.30) / 0.12, min=0.0, max=1.0)
 
-        orientation_gate = self._orientation_gate(self._pitch_gate_width(1.2), 0.25)
-
-        front_contact = torch.any(self.contact_filt[:, :2], dim=1)
-        contact_gate = 1.0 - 0.5 * front_contact.to(self.dof_pos.dtype)
-
         if self.hind_feet_ids.numel() > 0:
             hind_contacts = torch.all(self.contact_filt[:, self.hind_feet_ids], dim=1)
             hind_support_gate = hind_contacts.to(self.dof_pos.dtype)
         else:
             hind_support_gate = torch.ones(self.num_envs, dtype=self.dof_pos.dtype, device=self.device)
 
-        rotation_gate = torch.exp(-1.5 * torch.square(self.base_ang_vel[:, 2]))
-
         base_reward = 0.3 + 0.7 * knee_score * height_score
-        return base_reward * orientation_gate * contact_gate * hind_support_gate * rotation_gate
+        return base_reward * hind_support_gate
 
     def _reward_human_posture(self):
         """Encourage a human-like upright stance driven by hind-leg posture."""
@@ -1951,17 +1960,10 @@ class LeggedRobot(BaseTask):
         front_contact = torch.any(self.contact_filt[:, :2], dim=1)
         front_clear_gate = (~front_contact).to(self.dof_pos.dtype)
 
-        orientation_gate = self._orientation_gate(self._pitch_gate_width(0.7), 0.1)
-
         base_height = self.root_states[:, 2]
         height_gate = torch.clamp((base_height - 0.35) / 0.2, min=0.0, max=1.0)
 
-        hl_knee_idx = 8
-        hr_knee_idx = 11
-        knee_vel = torch.stack((self.dof_vel[:, hl_knee_idx], self.dof_vel[:, hr_knee_idx]), dim=1)
-        velocity_gate = torch.exp(-0.05 * torch.sum(torch.square(knee_vel), dim=1))
-
-        guard = front_clear_gate * orientation_gate * height_gate * velocity_gate
+        guard = front_clear_gate * height_gate
         return guard
     
     def _reward_hind_leg_extension_geom_backup(self):

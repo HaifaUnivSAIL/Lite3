@@ -98,3 +98,17 @@ Every training run now drops two helper scripts into its log directory. The “r
   Resumes training headlessly from the specified (or latest) checkpoint for that run. Task and run path are prefilled, so you only choose the checkpoint.
 
 Both scripts are made executable automatically during training startup and use repo-relative paths, so they won’t hit “file not found” as long as you launch them from inside the run’s log directory.***
+
+## Stand-Still Gating Functions
+
+Later phases often clamp specific axes of motion/rotation. Each gating reward has a numeric ID you can plug into experiments (roll must stay ID `0` to simplify lookups):
+
+| ID | Function | Description |
+| --- | --- | --- |
+| 0 | `reward_stand_still_roll_only` | Damp base roll rate (primary spin control). |
+| 1 | `reward_stand_still_yaw_only` | Damp yaw rotations (prevents pirouettes). |
+| 2 | `reward_stand_still_lin_x` | Clamp forward/backward drift. |
+| 3 | `reward_stand_still_lin_y` | Clamp lateral drift. |
+| 4 | `reward_stand_still_lin_z` | Clamp vertical velocity (prevents hopping). |
+
+Mix and match these IDs with different scales in phase 1/2 to gradually tighten stability without touching the warmup behavior.

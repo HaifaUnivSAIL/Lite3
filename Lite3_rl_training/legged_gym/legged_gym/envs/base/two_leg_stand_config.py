@@ -89,7 +89,7 @@ class TwoLegStandCfg(LeggedRobotCfg):
         # Custom posture shaping params
         front_legs = ["FL", "FR"]
         rear_legs = ["HL", "HR"]
-        torso_upright_pitch_target = float(np.deg2rad(70.0))  # preferred lean-back
+        torso_upright_pitch_target = float(np.deg2rad(-70.0))  # preferred lean-back
         torso_upright_pitch_tolerance = float(np.deg2rad(25.0))
         reward_upright_tolerance = float(np.deg2rad(22.0))
         front_foot_contact_penalty = -2.0
@@ -146,9 +146,10 @@ class TwoLegStandCfg(LeggedRobotCfg):
                     "trigger_thresh": 500,
                     "near_goal_init_prob": 0.0,
                     "reward_scales": {
-                        "front_legs_up_warmup": 16.0,
-                        "torso_upright_warmup": 1.4,
-                        "front_tap_penalty": -6.0,
+                        "front_legs_up_warmup": 18.0,
+                        "torso_upright_warmup": 8.0,
+                        "base_height_bonus": 6.0,
+                        "front_tap_penalty": 0.0,
                         "termination": -10.0,
                     }
                 },
@@ -157,41 +158,69 @@ class TwoLegStandCfg(LeggedRobotCfg):
                     "trigger_thresh": 1000,
                     "near_goal_init_prob": 0.0,
                     "reward_scales": {
-                        "front_legs_up_warmup": 8.0,
-                        "human_posture_warmup": 3.5,
-                        "torso_upright_warmup": 1.5,
-                        "stand_still": 0.1,
-                        "front_tap_penalty": -6.0,
+                        "front_legs_up_warmup": 14.0,
+                        "torso_upright_warmup": 10.0,
+                        "base_height_bonus": 8.0,
+                        "stand_still": 0.0,
+                        "front_tap_penalty": -1.0,
                         "termination": -10.0,
                     }
                 },
                 {
                     "name": "phase_1_posture_alignment",
-                    "trigger_thresh": 1500,
+                    "trigger_thresh": 2500,
                     "near_goal_init_prob": 0.45,
                     "reward_scales": {
-                        "human_posture": 6.0,
-                        "front_legs_up_continuous": 12.0,
-                        "torso_upright_continuous": 8.0,
-                        "hind_leg_extension_geom": 2.0,
-                        "stand_still": 0.1,
-                        "base_height_bonus": 2.0,
+                        "front_legs_up_warmup": 14.0,
+                        "torso_upright_warmup": 10.0,
+                        "base_height_bonus": 8.0,
+                        "stand_still_roll_only": 1.0,
+                        "front_tap_penalty": -1.0,
                         "termination": -10.0,
                     }
                 },
                 {
-                    "name": "phase_2_fine_standing",
-                    "trigger_thresh": 2000,
+                    "name": "phase_2_fine_standing_roll_supression",
+                    "trigger_thresh": 4000,
                     "near_goal_init_prob": 0.7,
                     "reward_scales": {
-                        "human_posture": 7.5,
-                        "front_legs_up_continuous": 14.0,
-                        "torso_upright_continuous": 10.0,
-                        "hind_leg_extension_geom": 2.5,
-                        "base_height_bonus": 2.2,
+                        "front_legs_up_warmup": 14.0,
+                        "torso_upright_warmup": 10.0,
+                        "base_height_bonus": 8.0,
+                        "stand_still_roll_only": 10.0,
+                        "front_tap_penalty": -1.0,
                         "termination": -10.0,
-                        "stand_still": 0.05,
-                        "front_tap_penalty": -7.5
+                    }
+                },
+                {
+                    "name": "phase_2_fine_standing_locally",
+                    "trigger_thresh": 7000,
+                    "near_goal_init_prob": 0.7,
+                    "reward_scales": {
+                        "front_legs_up_warmup": 14.0,
+                        "torso_upright_warmup": 10.0,
+                        "base_height_bonus": 8.0,
+                        "stand_still_roll_only": 10.0,
+                        "stand_still_lin_x": 10.0,
+                        "stand_still_lin_y": 10.0,
+                        "front_tap_penalty": -1.0,
+                        "termination": -10.0,
+                    }
+                },
+                {
+                    "name": "phase_2_fine_standing_chill",
+                    "trigger_thresh": 7000,
+                    "near_goal_init_prob": 0.7,
+                    "reward_scales": {
+                        "front_legs_up_warmup": 14.0,
+                        "torso_upright_warmup": 10.0,
+                        "base_height_bonus": 8.0,
+                        "stand_still_roll_only": 10.0,
+                        "stand_still_lin_x": 10.0,
+                        "stand_still_lin_y": 10.0,
+                        "_reward_torque_energy": 10.0,
+                        "front_tap_penalty": -1.0,
+                        "termination": -10.0,
                     }
                 }
             ]
