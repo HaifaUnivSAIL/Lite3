@@ -83,7 +83,7 @@ def _translate_sweep_key(key: str) -> str:
     return pattern.sub(replacer, key)
 
 
-from legged_gym.utils.helpers import class_to_dict, register
+from legged_gym.utils.helpers import class_to_dict, register, parse_device_str
 from legged_gym.utils.task_registry import task_registry
 from lite3_wandb_utils import (
     WandbConfigError,
@@ -187,6 +187,11 @@ def parse_args() -> argparse.Namespace:
         help="Maximum number of PPO iterations.",
     )
     parser.add_argument(
+        "--near-goal-init-prob",
+        type=float,
+        help="Probability to sample the initial state near the two-leg-stand goal pose.",
+    )
+    parser.add_argument(
         "--use-npu",
         action="store_true",
         help="Use NPU for inference.",
@@ -217,6 +222,33 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def _coerce_device(device_str: str, flag_name: str) -> str:
+    """Ensure the requested device exists; fall back to a valid option if not."""
+    try:
+        device, device_id = parse_device_str(device_str)
+    except Exception:
+        wandb.termwarn(f"Unrecognised {flag_name} '{device_str}', falling back to cpu.")
+        return "cpu"
+
+    if device != "cuda":
+        return device_str
+
+    gpu_count = torch.cuda.device_count()
+    if gpu_count == 0:
+        wandb.termwarn(f"No CUDA devices available; using cpu instead of {flag_name}={device_str}.")
+        return "cpu"
+
+    if device_id < 0 or device_id >= gpu_count:
+        fallback = "cuda:0"
+        wandb.termwarn(
+            f"{flag_name}={device_str} is out of range for this host (found {gpu_count} CUDA device(s)); "
+            f"using {fallback}."
+        )
+        return fallback
+
+    return device_str
+
+
 def build_train_args(cli_args: argparse.Namespace) -> SimpleNamespace:
     return SimpleNamespace(
         task=cli_args.task,
@@ -238,6 +270,7 @@ def build_train_args(cli_args: argparse.Namespace) -> SimpleNamespace:
         num_threads=cli_args.num_threads,
         subscenes=cli_args.subscenes,
         slices=cli_args.slices,
+        near_goal_init_prob=cli_args.near_goal_init_prob,
     )
 
 
@@ -315,6 +348,9 @@ def main() -> None:
                 )
             except WandbConfigError as exc:
                 raise SystemExit(str(exc)) from exc
+
+            args.rl_device = _coerce_device(args.rl_device, "--rl-device")
+            args.sim_device = _coerce_device(args.sim_device, "--sim-device")
 
             grouped = group_by_prefix(flat_config, prefixes=("env_cfg", "train_cfg"))
             translated_env = { _translate_sweep_key(k): v for k, v in grouped["env_cfg"].items() }

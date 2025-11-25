@@ -115,29 +115,42 @@ def get_load_path(root, load_run='-1', checkpoint=-1):
 
 
 def update_cfg_from_args(env_cfg, cfg_train, args):
+    # Handle args defensively so missing attributes from different callers don't crash sweeps.
+    def _maybe_get(name, default=None):
+        return getattr(args, name, default)
+
     # seed
     if env_cfg is not None:
         # num envs
-        if args.num_envs is not None:
-            env_cfg.env.num_envs = args.num_envs
-        if args.near_goal_init_prob is not None:
-            env_cfg.init_state.near_goal_init_prob = args.near_goal_init_prob
+        num_envs = _maybe_get("num_envs")
+        if num_envs is not None:
+            env_cfg.env.num_envs = num_envs
+        near_goal_prob = _maybe_get("near_goal_init_prob")
+        if near_goal_prob is not None:
+            env_cfg.init_state.near_goal_init_prob = near_goal_prob
     if cfg_train is not None:
-        if args.seed is not None:
-            cfg_train.seed = args.seed
+        seed = _maybe_get("seed")
+        if seed is not None:
+            cfg_train.seed = seed
         # alg runner parameters
-        if args.max_iterations is not None:
-            cfg_train.runner.max_iterations = args.max_iterations
-        if args.resume:
-            cfg_train.runner.resume = args.resume
-        if args.experiment_name is not None:
-            cfg_train.runner.experiment_name = args.experiment_name
-        if args.run_name is not None:
-            cfg_train.runner.run_name = args.run_name
-        if args.load_run is not None:
-            cfg_train.runner.load_run = args.load_run
-        if args.checkpoint is not None:
-            cfg_train.runner.checkpoint = args.checkpoint
+        max_iterations = _maybe_get("max_iterations")
+        if max_iterations is not None:
+            cfg_train.runner.max_iterations = max_iterations
+        resume = _maybe_get("resume", False)
+        if resume:
+            cfg_train.runner.resume = resume
+        experiment_name = _maybe_get("experiment_name")
+        if experiment_name is not None:
+            cfg_train.runner.experiment_name = experiment_name
+        run_name = _maybe_get("run_name")
+        if run_name is not None:
+            cfg_train.runner.run_name = run_name
+        load_run = _maybe_get("load_run")
+        if load_run is not None:
+            cfg_train.runner.load_run = load_run
+        checkpoint = _maybe_get("checkpoint")
+        if checkpoint is not None:
+            cfg_train.runner.checkpoint = checkpoint
 
     return env_cfg, cfg_train
 
