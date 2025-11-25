@@ -65,7 +65,36 @@ case "$MODE" in
     exit 1
     ;;
 esac
+### -------------------------------------------------------------------------
+### PATCH START: Auto-fix NVIDIA runtime only on systems where it's missing
+### -------------------------------------------------------------------------
 
+# 1. Detect Ubuntu version
+UBUNTU_VERSION=$(lsb_release -rs 2>/dev/null || echo "unknown")
+
+# 2. Check whether Docker recognizes the "nvidia" runtime
+if docker info 2>/dev/null | grep -q "Runtimes:.*nvidia"; then
+    RUNTIME_AVAILABLE=true
+else
+    RUNTIME_AVAILABLE=false
+fi
+
+# 3. If OS is 24.04+ OR runtime is missing → remove --runtime=nvidia
+if [[ "$UBUNTU_VERSION" == "24.04" || "$UBUNTU_VERSION" > "24.04" || "$RUNTIME_AVAILABLE" = false ]]; then
+    echo "[Patch] NVIDIA runtime not available on this system → switching to --gpus all only"
+    # Remove the --runtime=nvidia flag from DOCKER_ARGS
+    FILTERED_ARGS=()
+    for arg in "${DOCKER_ARGS[@]}"; do
+        if [[ "$arg" != "--runtime=nvidia" ]]; then
+            FILTERED_ARGS+=("$arg")
+        fi
+    done
+    DOCKER_ARGS=("${FILTERED_ARGS[@]}")
+fi
+
+### -------------------------------------------------------------------------
+### PATCH END
+### -------------------------------------------------------------------------
 echo "======================================"
 echo "Launching container: $CONTAINER_NAME"
 echo "Project root:        $PROJECT_ROOT"
