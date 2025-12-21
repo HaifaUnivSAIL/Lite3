@@ -264,6 +264,12 @@ class LeggedRobot(BaseTask):
         self.reset_buf |= torch.logical_or(torch.abs(self.rpy[:, 1]) > 1.0, torch.abs(self.rpy[:, 0]) > 0.5)  # 60 degrees
         self.time_out_buf = self.episode_length_buf > self.max_episode_length  # no terminal reward for time-outs
 
+        # Optional termination if hind feet lose contact (to discourage airborne exploits)
+        require_hind_contact = getattr(self.cfg.rewards, "require_hind_contact", False)
+        if require_hind_contact and self.hind_feet_ids.numel() > 0:
+            hind_contacts = torch.all(self.contact_filt[:, self.hind_feet_ids], dim=1)
+            self.reset_buf |= ~hind_contacts
+
         if self.front_touch_termination_active and self.front_feet_ids.numel() > 0:
             front_touch = torch.any(self.contact_filt[:, self.front_feet_ids], dim=1)
             self.front_touch_violation |= front_touch
@@ -1825,6 +1831,24 @@ class LeggedRobot(BaseTask):
         """Reward keeping vertical velocity low (prevents hopping)."""
         lin_z = torch.abs(self.base_lin_vel[:, 2])
         return torch.exp(-0.8 * lin_z)
+
+    def _reward_hind_legs_calmness(self):
+        """Reward hind legs for staying calm: low joint velocities and low torques while in contact."""
+        # Hind joint indices: hips (7,10), knees (8,11)
+        hind_joint_ids = torch.tensor([7, 10, 8, 11], device=self.device)
+        joint_vel = self.dof_vel[:, hind_joint_ids]
+        joint_torque = self.torques[:, hind_joint_ids]
+
+        vel_gate = torch.exp(-0.5 * torch.norm(joint_vel, dim=1))
+        torque_gate = torch.exp(-0.2 * torch.norm(joint_torque, dim=1))
+
+        if self.hind_feet_ids.numel() > 0:
+            hind_contacts = torch.all(self.contact_filt[:, self.hind_feet_ids], dim=1)
+            contact_gate = hind_contacts.to(self.dof_pos.dtype)
+        else:
+            contact_gate = torch.ones(self.num_envs, dtype=self.dof_pos.dtype, device=self.device)
+
+        return vel_gate * torque_gate * contact_gate
         
     def _reward_torso_upright(self):
         """
@@ -2132,7 +2156,12 @@ class LeggedRobot(BaseTask):
         max_height = getattr(self.cfg.rewards, "base_height_bonus_ceiling", 0.8)
         base_height = self.root_states[:, 2]
         bonus = torch.clamp((base_height - min_height) / max(max_height - min_height, 1e-4), min=0.0, max=1.0)
-        return bonus
+        if self.hind_feet_ids.numel() > 0:
+            hind_contacts = torch.all(self.contact_filt[:, self.hind_feet_ids], dim=1)
+            contact_gate = hind_contacts.to(self.dof_pos.dtype)
+        else:
+            contact_gate = torch.ones(self.num_envs, dtype=self.dof_pos.dtype, device=self.device)
+        return bonus * contact_gate
 
     def _reward_foot_stillness(self):
         foot_velocities = self.root_states[:, 7:10]  # or use proper frame transform

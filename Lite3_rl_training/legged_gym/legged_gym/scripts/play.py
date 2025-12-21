@@ -99,13 +99,21 @@ def play(args):
             # --- Debug export of obs/action for deployment comparison ---
             if i < 10:
                 import numpy as np, os
-                os.makedirs("debug_training_obs", exist_ok=True)
+                # Save next to the repo root (Lite3_rl_training/debug_training_obs)
+                dump_root = os.path.join(os.path.dirname(LEGGED_GYM_ROOT_DIR), "debug_training_obs")
+                os.makedirs(dump_root, exist_ok=True)
                 np.savez(
-                    f"debug_training_obs/step_{i:02d}.npz",
+                    os.path.join(dump_root, f"step_{i:02d}.npz"),
                     obs=obs.cpu().numpy(),
                     obs_history=obs_history.cpu().numpy(),
                     action=actions.cpu().numpy(),
                 )
+                if i == 0:
+                    # Flatten ONNX-style input: [current_obs, history_frames (oldest->newest)]
+                    hist = obs_history[0].cpu().numpy().reshape(-1, obs.shape[1])
+                    flat_input = np.concatenate([obs[0].cpu().numpy(), hist.flatten()])
+                    with open(os.path.join(dump_root, "flat_step_00.txt"), "w") as f:
+                        f.write(" ".join(map(str, flat_input)))
             # --- End debug export ---
             # print(actions[0])
         obs_dict, rews, dones, infos = env.step(actions)

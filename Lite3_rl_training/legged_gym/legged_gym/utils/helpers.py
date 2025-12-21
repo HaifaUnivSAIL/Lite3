@@ -148,6 +148,9 @@ def update_cfg_from_args(env_cfg, cfg_train, args):
         load_run = _maybe_get("load_run")
         if load_run is not None:
             cfg_train.runner.load_run = load_run
+        load_experiment = _maybe_get("load_experiment")
+        if load_experiment is not None:
+            setattr(cfg_train.runner, "load_experiment", load_experiment)
         checkpoint = _maybe_get("checkpoint")
         if checkpoint is not None:
             cfg_train.runner.checkpoint = checkpoint
@@ -192,6 +195,11 @@ def get_args():
     parser.add_argument("--checkpoint", type=str,
                         help="Saved model checkpoint number. If -1: will load the last checkpoint. "
                              "Overrides config file if provided.")
+    parser.add_argument(
+        "--load_experiment",
+        type=str,
+        help="Experiment directory inside legged_gym/logs to load from when resuming (defaults to the current experiment).",
+    )
     parser.add_argument("--headless", action="store_true", default=False,
                         help="Force display off at all times")
     parser.add_argument("--horovod", action="store_true", default=False,
@@ -233,5 +241,10 @@ def register(task_name, task_registry):
         from legged_gym.envs.base.two_leg_stand_config import TwoLegStandCfg, TwoLegStandCfgPPO
         task_registry.register("lite3_two_leg_stand", LeggedRobot, TwoLegStandCfg(), TwoLegStandCfgPPO())
 
+    elif task_name == 'lite3_two_leg_stand_still':
+        from legged_gym.envs.base.legged_robot import LeggedRobot
+        from legged_gym.envs.base.two_leg_stand_still_config import TwoLegStandStillCfg, TwoLegStandStillCfgPPO
+        task_registry.register("lite3_two_leg_stand_still", LeggedRobot, TwoLegStandStillCfg(), TwoLegStandStillCfgPPO())
+
     else:
-        raise Exception("no such task_name. Possible names are: lite3, lite3_two_leg_stand")
+        raise Exception("no such task_name. Possible names are: lite3, lite3_two_leg_stand, lite3_two_leg_stand_still")

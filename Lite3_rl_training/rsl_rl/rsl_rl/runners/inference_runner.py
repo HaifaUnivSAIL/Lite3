@@ -34,6 +34,7 @@ legged_gym_dir = os.path.dirname(os.path.dirname(currentdir))
 sys.path.append(os.path.join(os.path.dirname(legged_gym_dir), "acllite"))
 
 from legged_gym.utils.helpers import get_load_path
+from legged_gym import LEGGED_GYM_ROOT_DIR
 from rsl_rl.env import HistoryWrapper
 
 
@@ -69,7 +70,15 @@ class InferenceRunner:
 
         if self.cfg['resume']:
             # load previously trained model
-            resume_path = get_load_path(os.path.dirname(log_dir),
+            load_root = os.path.dirname(log_dir) if log_dir else None
+            load_experiment = self.cfg.get("load_experiment")
+            if load_experiment:
+                load_root = load_experiment if os.path.isabs(load_experiment) else os.path.join(
+                    LEGGED_GYM_ROOT_DIR, "logs", load_experiment
+                )
+            if not load_root:
+                raise ValueError("Cannot resume without a log_dir or runner.load_experiment")
+            resume_path = get_load_path(load_root,
                                         load_run=self.cfg['load_run'],
                                         checkpoint=self.cfg['checkpoint'])  # last one
             print(f"Loading model from: {resume_path}")

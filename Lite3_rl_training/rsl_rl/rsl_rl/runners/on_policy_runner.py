@@ -35,6 +35,7 @@ from collections import deque
 import statistics
 import csv
 from legged_gym.utils.helpers import get_load_path
+from legged_gym import LEGGED_GYM_ROOT_DIR
 
 from torch.utils.tensorboard import SummaryWriter
 import torch
@@ -82,7 +83,15 @@ class OnPolicyRunner:
         self.current_learning_iteration = 0
         if self.cfg['resume']:
             # load previously trained model
-            resume_path = get_load_path(os.path.dirname(log_dir),
+            load_root = os.path.dirname(log_dir) if log_dir else None
+            load_experiment = self.cfg.get("load_experiment")
+            if load_experiment:
+                load_root = load_experiment if os.path.isabs(load_experiment) else os.path.join(
+                    LEGGED_GYM_ROOT_DIR, "logs", load_experiment
+                )
+            if not load_root:
+                raise ValueError("Cannot resume without a log_dir or runner.load_experiment")
+            resume_path = get_load_path(load_root,
                                         load_run=self.cfg['load_run'],
                                         checkpoint=self.cfg['checkpoint'])  # last one
             print(f"Loading model from: {resume_path}")

@@ -96,6 +96,7 @@ class TwoLegStandCfg(LeggedRobotCfg):
         foot_stillness_reward_weight = 1.0
         base_height_bonus_threshold = 0.6
         base_height_bonus_ceiling = 0.9
+        require_hind_contact = False
 
         class scales(LeggedRobotCfg.rewards.scales):
             torso_upright = 4.5
@@ -175,6 +176,7 @@ class TwoLegStandCfg(LeggedRobotCfg):
                         "torso_upright_warmup": 10.0,
                         "base_height_bonus": 8.0,
                         "stand_still_roll_only": 1.0,
+                        "hind_legs_calmness": 1.0,
                         "front_tap_penalty": -1.0,
                         "termination": -10.0,
                     }
@@ -188,37 +190,6 @@ class TwoLegStandCfg(LeggedRobotCfg):
                         "torso_upright_warmup": 10.0,
                         "base_height_bonus": 8.0,
                         "stand_still_roll_only": 10.0,
-                        "front_tap_penalty": -1.0,
-                        "termination": -10.0,
-                    }
-                },
-                {
-                    "name": "phase_2_fine_standing_locally",
-                    "trigger_thresh": 7000,
-                    "near_goal_init_prob": 0.7,
-                    "reward_scales": {
-                        "front_legs_up_warmup": 14.0,
-                        "torso_upright_warmup": 10.0,
-                        "base_height_bonus": 8.0,
-                        "stand_still_roll_only": 10.0,
-                        "stand_still_lin_x": 10.0,
-                        "stand_still_lin_y": 10.0,
-                        "front_tap_penalty": -1.0,
-                        "termination": -10.0,
-                    }
-                },
-                {
-                    "name": "phase_2_fine_standing_chill",
-                    "trigger_thresh": 7000,
-                    "near_goal_init_prob": 0.7,
-                    "reward_scales": {
-                        "front_legs_up_warmup": 14.0,
-                        "torso_upright_warmup": 10.0,
-                        "base_height_bonus": 8.0,
-                        "stand_still_roll_only": 10.0,
-                        "stand_still_lin_x": 10.0,
-                        "stand_still_lin_y": 10.0,
-                        "_reward_torque_energy": 10.0,
                         "front_tap_penalty": -1.0,
                         "termination": -10.0,
                     }
