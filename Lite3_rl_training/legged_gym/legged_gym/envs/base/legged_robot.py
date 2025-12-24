@@ -261,7 +261,23 @@ class LeggedRobot(BaseTask):
         """ Check if environments need to be reset
         """
         self.reset_buf = torch.any(torch.norm(self.contact_forces[:, self.termination_contact_indices, :], dim=-1) > 1., dim=1)
-        self.reset_buf |= torch.logical_or(torch.abs(self.rpy[:, 1]) > 1.0, torch.abs(self.rpy[:, 0]) > 0.5)  # 60 degrees
+        # Allow per-task posture termination limits (to match deployment safety gates).
+        roll_limit_rad = getattr(self.cfg.rewards, "termination_roll_rad", None)
+        pitch_limit_rad = getattr(self.cfg.rewards, "termination_pitch_rad", None)
+        if roll_limit_rad is None:
+            roll_limit_deg = getattr(self.cfg.rewards, "termination_roll_deg", None)
+            if roll_limit_deg is not None:
+                roll_limit_rad = float(roll_limit_deg) * np.pi / 180.0
+        if pitch_limit_rad is None:
+            pitch_limit_deg = getattr(self.cfg.rewards, "termination_pitch_deg", None)
+            if pitch_limit_deg is not None:
+                pitch_limit_rad = float(pitch_limit_deg) * np.pi / 180.0
+        if roll_limit_rad is None:
+            roll_limit_rad = 0.5
+        if pitch_limit_rad is None:
+            pitch_limit_rad = 1.0
+        self.reset_buf |= torch.logical_or(torch.abs(self.rpy[:, 1]) > pitch_limit_rad,
+                                           torch.abs(self.rpy[:, 0]) > roll_limit_rad)
         self.time_out_buf = self.episode_length_buf > self.max_episode_length  # no terminal reward for time-outs
 
         # Optional termination if hind feet lose contact (to discourage airborne exploits)
@@ -1705,9 +1721,70 @@ class LeggedRobot(BaseTask):
         roll_den = max(roll_width if roll_width is not None else 0.2, 1e-4)
         return torch.exp(-(torch.square(pitch_error) / pitch_den + torch.square(roll) / roll_den))
 
+    def _deploy_posture_limits_rad(self):
+        """Return (roll_limit_rad, pitch_limit_rad) if configured, else (None, None)."""
+        roll_limit_rad = getattr(self.cfg.rewards, "deploy_roll_limit_rad", None)
+        pitch_limit_rad = getattr(self.cfg.rewards, "deploy_pitch_limit_rad", None)
+
+        if roll_limit_rad is None:
+            roll_limit_deg = getattr(self.cfg.rewards, "deploy_roll_limit_deg", None)
+            if roll_limit_deg is not None:
+                roll_limit_rad = float(roll_limit_deg) * np.pi / 180.0
+        if pitch_limit_rad is None:
+            pitch_limit_deg = getattr(self.cfg.rewards, "deploy_pitch_limit_deg", None)
+            if pitch_limit_deg is not None:
+                pitch_limit_rad = float(pitch_limit_deg) * np.pi / 180.0
+
+        if roll_limit_rad is None or pitch_limit_rad is None:
+            return None, None
+
+        margin_deg = getattr(self.cfg.rewards, "deploy_posture_margin_deg", 0.0)
+        if margin_deg:
+            margin_rad = float(margin_deg) * np.pi / 180.0
+            roll_limit_rad += margin_rad
+            pitch_limit_rad += margin_rad
+
+        return float(roll_limit_rad), float(pitch_limit_rad)
+
+    def _safety_effort_gate(self):
+        """Return a (0, 1] gate that downweights rewards when effort is high.
+
+        This is meant to mirror deployment "safety gates" (torque/velocity/power constraints)
+        while keeping rewards bounded and compatible with `only_positive_rewards=True`.
+        """
+        w_tau = float(getattr(self.cfg.rewards, "safe_gate_torque_limits_weight", 0.0) or 0.0)
+        w_vel = float(getattr(self.cfg.rewards, "safe_gate_dof_vel_limits_weight", 0.0) or 0.0)
+        w_power = float(getattr(self.cfg.rewards, "safe_gate_power_weight", 0.0) or 0.0)
+        w_action = float(getattr(self.cfg.rewards, "safe_gate_action_weight", 0.0) or 0.0)
+
+        if w_tau <= 0.0 and w_vel <= 0.0 and w_power <= 0.0 and w_action <= 0.0:
+            return torch.ones(self.num_envs, dtype=self.dof_pos.dtype, device=self.device)
+
+        penalty = torch.zeros(self.num_envs, dtype=self.dof_pos.dtype, device=self.device)
+        if w_tau > 0.0:
+            penalty = penalty + w_tau * self._reward_torque_limits()
+        if w_vel > 0.0:
+            penalty = penalty + w_vel * self._reward_dof_vel_limits()
+        if w_power > 0.0:
+            penalty = penalty + w_power * self._reward_power()
+        if w_action > 0.0 and hasattr(self, "actions"):
+            penalty = penalty + w_action * self._reward_action_magnitude()
+
+        penalty = penalty.clamp(min=0.0)
+        return (1.0 / (1.0 + penalty)).clamp(min=0.0, max=1.0)
+
     def _pitch_gate_width(self, scale: float = 1.0) -> float:
         base_tol = getattr(self.cfg.rewards, "torso_upright_pitch_tolerance", 0.3)
         return max((base_tol * scale) ** 2, 1e-4)
+
+    def _reward_deploy_posture_gate(self):
+        """Penalty mirroring deployment posture safety gate (roll/pitch limits)."""
+        roll_limit_rad, pitch_limit_rad = self._deploy_posture_limits_rad()
+        if roll_limit_rad is None or pitch_limit_rad is None:
+            return torch.zeros(self.num_envs, dtype=self.dof_pos.dtype, device=self.device)
+        roll_excess = (torch.abs(self.rpy[:, 0]) - roll_limit_rad).clamp(min=0.0)
+        pitch_excess = (torch.abs(self.rpy[:, 1]) - pitch_limit_rad).clamp(min=0.0)
+        return roll_excess + pitch_excess
 
     def _reward_base_height(self):
         # No penalty term; base height encouragement handled via bonus terms.
@@ -1733,6 +1810,10 @@ class LeggedRobot(BaseTask):
     def _reward_action_rate(self):
         # Penalize changes in actions
         return torch.sum(torch.square(self.last_actions - self.actions), dim=1)
+
+    def _reward_action_magnitude(self):
+        """Penalize large action magnitudes (scaled joint target offsets)."""
+        return torch.sum(torch.square(self.actions), dim=1)
 
     def _reward_target_smoothness(self):
         # Penalize changes in actions
@@ -2107,6 +2188,10 @@ class LeggedRobot(BaseTask):
 
         return both_up * duration_reward * velocity_gate * orientation_gate * height_gate * hind_support_gate * rotation_gate
 
+    def _reward_front_legs_up_continuous_safe(self):
+        """Safe version of front-leg clearance reward (effort/velocity gated)."""
+        return self._reward_front_legs_up_continuous() * self._safety_effort_gate()
+
     def _reward_front_legs_up_warmup(self):
         """Transition reward to guide the robot toward stable front-leg lifting."""
         if self.front_air_time is None or self.front_feet_ids.numel() == 0:
@@ -2140,6 +2225,10 @@ class LeggedRobot(BaseTask):
 
         base_score = 0.4 + 0.6 * duration_reward
         return both_up * base_score * velocity_gate * orientation_gate * height_gate * hind_support_gate * rotation_gate
+
+    def _reward_front_legs_up_warmup_safe(self):
+        """Safe version of warmup transition reward (effort/velocity gated)."""
+        return self._reward_front_legs_up_warmup() * self._safety_effort_gate()
 
     def _reward_front_tap_penalty(self):
         if self.front_feet_ids.numel() == 0:
@@ -2206,6 +2295,10 @@ class LeggedRobot(BaseTask):
         metric = metric * torch.clamp(lin_gate, 0.0, 1.0) * torch.clamp(ang_gate, 0.0, 1.0)
         metric = metric * torch.clamp(tapping_gate, 0.0, 1.0)
         return torch.clamp(metric, 0.0, 1.0)
+
+    def _reward_two_leg_stability_safe(self):
+        """Reward two-leg stability only when effort stays inside a safe envelope."""
+        return self._compute_two_leg_stand_metric() * self._safety_effort_gate()
 
     # def _reward_feet_height(self):
     #     # Penalize feet height error

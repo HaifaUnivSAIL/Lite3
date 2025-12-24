@@ -9,6 +9,19 @@ class TwoLegStandStillCfg(TwoLegStandCfg):
     """
 
     class rewards(TwoLegStandCfg.rewards):
+        # ---------------- Deployment safety gates ----------------
+        # Mirror the deploy posture guard (roll/pitch) so training learns to stay inside
+        # the same envelope that would otherwise trigger JointDamping on the robot.
+        deploy_roll_limit_deg = 40.0
+        # NOTE: two-leg stand intentionally uses a large lean-back pitch; keep this high enough
+        # to not block the intended solution (tighten only if your real-robot safety requires it).
+        deploy_pitch_limit_deg = 90.0
+        deploy_posture_margin_deg = 0.5  # extra slack (deg) to avoid chattering at the boundary
+
+        # Also align training terminations with the same limits (optional but recommended).
+        termination_roll_deg = deploy_roll_limit_deg
+        termination_pitch_deg = deploy_pitch_limit_deg
+
         # Ensure stillness terms exist in base scales so curriculum can activate them.
         class scales(TwoLegStandCfg.rewards.scales):
             stand_still_roll_only = 0.05
@@ -16,6 +29,8 @@ class TwoLegStandStillCfg(TwoLegStandCfg):
             hind_legs_calmness = 0.2
             feet_velocity = -0.05
             action_rate = -0.01
+            # Penalty for exceeding deploy posture limits (radians over limit).
+            deploy_posture_gate = -5.0
 
         class curriculum:
             enabled = True
@@ -39,6 +54,7 @@ class TwoLegStandStillCfg(TwoLegStandCfg):
                         "torso_upright_warmup": 8.0,
                         "base_height_bonus": 6.0,
                         "front_tap_penalty": -0.5,
+                        "deploy_posture_gate": -5.0,
                         "termination": -10.0,
                     },
                 },
@@ -58,6 +74,7 @@ class TwoLegStandStillCfg(TwoLegStandCfg):
                         "feet_velocity": -0.2,
                         "action_rate": -0.01,
                         "front_tap_penalty": -1.5,
+                        "deploy_posture_gate": -5.0,
                         "termination": -10.0,
                     },
                 },
@@ -77,6 +94,7 @@ class TwoLegStandStillCfg(TwoLegStandCfg):
                         "action_rate": -0.02,
                         "front_tap_penalty": -2.0,
                         "base_height_bonus": 6.0,
+                        "deploy_posture_gate": -5.0,
                         "termination": -10.0,
                     },
                 },
@@ -97,6 +115,7 @@ class TwoLegStandStillCfg(TwoLegStandCfg):
                         "action_rate": -0.03,
                         "front_tap_penalty": -3.0,
                         "base_height_bonus": 6.0,
+                        "deploy_posture_gate": -5.0,
                         "termination": -10.0,
                     },
                 },
@@ -106,4 +125,3 @@ class TwoLegStandStillCfg(TwoLegStandCfg):
 class TwoLegStandStillCfgPPO(TwoLegStandCfgPPO):
     class runner(TwoLegStandCfgPPO.runner):
         experiment_name = "two_leg_stand_still"
-

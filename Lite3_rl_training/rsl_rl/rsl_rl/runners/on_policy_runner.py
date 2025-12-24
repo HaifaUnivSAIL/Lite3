@@ -192,6 +192,24 @@ class OnPolicyRunner:
             from legged_gym.scripts.plot_reward import save_reward_csv
             save_reward_csv(os.path.join(self.log_dir, 'rewards.csv'), dt=self.env.dt)
 
+    def _get_active_reward_names(self):
+        env = self.env.env if hasattr(self.env, "env") else self.env
+        if env is None:
+            return None
+        reward_scales = getattr(env, "reward_scales", None)
+        base_active = None
+        if reward_scales is not None:
+            base_active = {name for name, scale in reward_scales.items() if scale != 0}
+        curriculum = getattr(env, "curriculum_controller", None)
+        if curriculum is not None and getattr(curriculum, "enabled", False):
+            current_scales = getattr(curriculum, "current_scales", None)
+            if current_scales:
+                active = {name for name, scale in current_scales.items() if scale != 0}
+                if reward_scales is not None and reward_scales.get("termination", 0) != 0:
+                    active.add("termination")
+                return active
+        return base_active
+
     def log(self, locs, width=80, pad=35):
         self.tot_timesteps += self.num_steps_per_env * self.env.num_envs
         self.tot_time += locs['collection_time'] + locs['learn_time']
@@ -218,6 +236,7 @@ class OnPolicyRunner:
 
         ep_string = f''
         if locs['ep_infos']:
+            active_reward_names = self._get_active_reward_names()
             if self.save_rewards is True and self.csv_header is None:
                 self.csv_header = [key for key in locs['ep_infos'][0]] + ['total_reward']
                 with open(os.path.join(self.log_dir, 'rewards.csv'), 'w', newline='') as f:
@@ -239,7 +258,12 @@ class OnPolicyRunner:
                 if self.writer is not None:
                     self.writer.add_scalar('Episode/' + key, value, locs['it'])
                 reward_row.append(value.cpu().numpy())  # record rewards
-                ep_string += f"""{f'Mean episode {key}:':>{pad}} {value:.4f}\n"""
+                should_print = True
+                if key.startswith("rew_") and active_reward_names is not None:
+                    reward_name = key[4:]
+                    should_print = reward_name in active_reward_names
+                if should_print:
+                    ep_string += f"""{f'Mean episode {key}:':>{pad}} {value:.4f}\n"""
 
             # write each reward item into a csv file
             reward_row.append(statistics.mean(locs['rewbuffer']) if len(locs['rewbuffer']) != 0 else 0.)

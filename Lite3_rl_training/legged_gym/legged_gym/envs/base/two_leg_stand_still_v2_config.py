@@ -21,6 +21,8 @@ class TwoLegStandStillV2Cfg(TwoLegStandStillCfg):
             stand_still_lin_x = 0.05
             stand_still_lin_y = 0.05
             stand_still_lin_z = 0.05
+            # Enable joint-velocity penalties for later curriculum phases.
+            dof_vel = -1e-6
 
         class curriculum:
             enabled = True
@@ -49,6 +51,7 @@ class TwoLegStandStillV2Cfg(TwoLegStandStillCfg):
                         "stand_still_lin_x": 0.2,
                         "stand_still_lin_y": 0.2,
                         "front_tap_penalty": -0.3,
+                        "deploy_posture_gate": -5.0,
                         "termination": -10.0,
                     },
                 },
@@ -70,12 +73,14 @@ class TwoLegStandStillV2Cfg(TwoLegStandStillCfg):
                         "feet_velocity": -0.15,
                         "action_rate": -0.01,
                         "front_tap_penalty": -1.0,
+                        "deploy_posture_gate": -5.0,
                         "termination": -10.0,
                     },
                 },
                 {  # Gentle transition: mix warmup + continuous terms, light penalties.
                     "name": "phase_2_transition_reduce_spin",
-                    "trigger_thresh": 6000,
+                    # Keep this phase longer; model_5000.pt tends to be best here.
+                    "trigger_thresh": 10000,
                     "near_goal_init_prob": 0.45,
                     "reward_scales": {
                         "front_legs_up_warmup": 10.0,
@@ -94,12 +99,14 @@ class TwoLegStandStillV2Cfg(TwoLegStandStillCfg):
                         "feet_velocity": -0.25,
                         "action_rate": -0.02,
                         "front_tap_penalty": -1.8,
+                        "deploy_posture_gate": -5.0,
                         "termination": -10.0,
                     },
                 },
                 {  # Refinement: emphasize quiet, no-spin stability.
                     "name": "phase_3_refine_still_stand",
-                    "trigger_thresh": 13000,
+                    # Run the remainder of a 15k-iter training budget in this phase.
+                    "trigger_thresh": 15000,
                     "near_goal_init_prob": 0.7,
                     "reward_scales": {
                         "front_legs_up_continuous": 7.0,
@@ -112,10 +119,14 @@ class TwoLegStandStillV2Cfg(TwoLegStandStillCfg):
                         "stand_still_lin_x": 1.2,
                         "stand_still_lin_y": 1.2,
                         "stand_still_lin_z": 0.8,
-                        "feet_velocity": -0.45,
-                        "action_rate": -0.03,
+                        # Stronger gating on effort/energy + leg motion.
+                        "torques": -0.0002,
+                        "dof_vel": -0.0002,
+                        "feet_velocity": -0.65,
+                        "action_rate": -0.04,
                         "front_tap_penalty": -2.8,
                         "base_height_bonus": 6.0,
+                        "deploy_posture_gate": -5.0,
                         "termination": -10.0,
                     },
                 },
@@ -134,10 +145,13 @@ class TwoLegStandStillV2Cfg(TwoLegStandStillCfg):
                         "stand_still_lin_x": 1.4,
                         "stand_still_lin_y": 1.4,
                         "stand_still_lin_z": 1.0,
-                        "feet_velocity": -0.55,
-                        "action_rate": -0.04,
+                        "torques": -0.0003,
+                        "dof_vel": -0.0003,
+                        "feet_velocity": -0.75,
+                        "action_rate": -0.05,
                         "front_tap_penalty": -3.2,
                         "base_height_bonus": 6.0,
+                        "deploy_posture_gate": -5.0,
                         "termination": -10.0,
                     },
                 },
@@ -155,4 +169,3 @@ class TwoLegStandStillV2Cfg(TwoLegStandStillCfg):
 class TwoLegStandStillV2CfgPPO(TwoLegStandStillCfgPPO):
     class runner(TwoLegStandStillCfgPPO.runner):
         experiment_name = "two_leg_stand_still_v2"
-
