@@ -92,6 +92,21 @@ class LeggedRobot(BaseTask):
             'ang_vel': 0.0,
             'joint': 0.0,
         }
+        raw_deploy_prob = getattr(self.cfg.init_state, "deploy_reset_prob", 0.0)
+        self.deploy_reset_prob = float(raw_deploy_prob) if raw_deploy_prob is not None else 0.0
+        self.deploy_reset_prob = max(0.0, min(1.0, self.deploy_reset_prob))
+        self.deploy_reset_cfg = getattr(self.cfg.init_state, "deploy_reset_state", None)
+        self.deploy_reset_noise_cfg = getattr(self.cfg.init_state, "deploy_reset_noise", {}) or {}
+        self.deploy_reset_enabled = self.deploy_reset_prob > 0.0 and self.deploy_reset_cfg is not None
+        self.deploy_root_state = None
+        self.deploy_dof_pos = None
+        self.deploy_reset_noise = {
+            'pos': 0.0,
+            'rot': 0.0,
+            'lin_vel': 0.0,
+            'ang_vel': 0.0,
+            'joint': 0.0,
+        }
 
         if not self.headless:
             self.set_camera(self.cfg.viewer.pos, self.cfg.viewer.lookat)
@@ -111,6 +126,8 @@ class LeggedRobot(BaseTask):
         self.height_noise_mean = 0.
         if self.goal_state_enabled:
             print(f"[LeggedRobot] Near-goal spawn enabled with probability {self.goal_state_prob:.2f}")
+        if self.deploy_reset_enabled:
+            print(f"[LeggedRobot] Deploy reset enabled with probability {self.deploy_reset_prob:.2f}")
 
         # load actuator network
         self.actuator_net = None
@@ -321,9 +338,10 @@ class LeggedRobot(BaseTask):
             self.update_command_curriculum(env_ids)
 
         goal_env_ids = self._sample_goal_state_envs(env_ids)
+        deploy_env_ids = self._sample_deploy_reset_envs(env_ids)
         # reset robot states
-        self._reset_dofs(env_ids, goal_env_ids)
-        self._reset_root_states(env_ids, goal_env_ids)
+        self._reset_dofs(env_ids, goal_env_ids, deploy_env_ids)
+        self._reset_root_states(env_ids, goal_env_ids, deploy_env_ids)
         self.episode_v_integral[env_ids].zero_()
         self.episode_w_integral[env_ids].zero_()
         # self.pmtg.reset(env_ids)
@@ -851,7 +869,19 @@ class LeggedRobot(BaseTask):
             return env_ids[mask]
         return env_ids.new_empty((0,), dtype=env_ids.dtype)
 
-    def _reset_dofs(self, env_ids, goal_env_ids=None):
+    def _sample_deploy_reset_envs(self, env_ids: torch.Tensor) -> torch.Tensor:
+        """Pick a subset of envs that should spawn from deploy reset state."""
+        if not self.deploy_reset_enabled or env_ids.numel() == 0:
+            return env_ids.new_empty((0,), dtype=env_ids.dtype)
+        if self.deploy_reset_prob >= 1.0:
+            return env_ids.clone()
+        rand_vals = torch.rand(env_ids.shape[0], device=env_ids.device)
+        mask = rand_vals < self.deploy_reset_prob
+        if mask.any():
+            return env_ids[mask]
+        return env_ids.new_empty((0,), dtype=env_ids.dtype)
+
+    def _reset_dofs(self, env_ids, goal_env_ids=None, deploy_env_ids=None):
         """ Resets DOF position and velocities of selected environmments
         Positions are randomly selected within 0.5:1.5 x default positions.
         Velocities are set to zero.
@@ -859,9 +889,20 @@ class LeggedRobot(BaseTask):
         Args:
             env_ids (List[int]): Environemnt ids
             goal_env_ids (torch.Tensor, optional): env ids to be initialized near the goal state.
+            deploy_env_ids (torch.Tensor, optional): env ids to be initialized near deploy reset state.
         """
         self.dof_pos[env_ids] = self.default_dof_pos * torch_rand_float(
             0.5, 1.5, (len(env_ids), self.num_dof), device=self.device)
+        if deploy_env_ids is not None and self.deploy_dof_pos is not None and deploy_env_ids.numel() > 0:
+            deploy_targets = self.deploy_dof_pos.repeat(deploy_env_ids.shape[0], 1)
+            joint_noise = self.deploy_reset_noise.get('joint', 0.0)
+            if joint_noise > 0.0:
+                noise = torch_rand_float(-joint_noise,
+                                         joint_noise,
+                                         (deploy_env_ids.shape[0], self.num_dof),
+                                         device=self.device)
+                deploy_targets = deploy_targets + noise
+            self.dof_pos[deploy_env_ids] = deploy_targets
         if goal_env_ids is not None and self.goal_dof_pos is not None and goal_env_ids.numel() > 0:
             goal_targets = self.goal_dof_pos.repeat(goal_env_ids.shape[0], 1)
             joint_noise = self.goal_state_noise.get('joint', 0.0)
@@ -878,13 +919,14 @@ class LeggedRobot(BaseTask):
         self.gym.set_dof_state_tensor_indexed(self.sim, gymtorch.unwrap_tensor(self.dof_state),
                                               gymtorch.unwrap_tensor(env_ids_int32), len(env_ids_int32))
 
-    def _reset_root_states(self, env_ids, goal_env_ids=None):
+    def _reset_root_states(self, env_ids, goal_env_ids=None, deploy_env_ids=None):
         """ Resets ROOT states position and velocities of selected environmments
             Sets base position based on the curriculum
             Selects randomized base velocities within -0.5:0.5 [m/s, rad/s]
         Args:
             env_ids (List[int]): Environemnt ids
             goal_env_ids (torch.Tensor, optional): env ids to be initialized near the goal state.
+            deploy_env_ids (torch.Tensor, optional): env ids to be initialized near deploy reset state.
         """
         # base position
         if self.custom_origins:
@@ -898,6 +940,8 @@ class LeggedRobot(BaseTask):
         # base velocities
         self.root_states[env_ids, 7:13] = torch_rand_float(-0.5, 0.5, (len(env_ids), 6),
                                                            device=self.device)  # [7:10]: lin vel, [10:13]: ang vel
+        if deploy_env_ids is not None and self.deploy_root_state is not None and deploy_env_ids.numel() > 0:
+            self._apply_custom_root_state(deploy_env_ids, self.deploy_root_state, self.deploy_reset_noise)
         if goal_env_ids is not None and self.goal_root_state is not None and goal_env_ids.numel() > 0:
             self._apply_goal_root_state(goal_env_ids)
         env_ids_int32 = env_ids.to(dtype=torch.int32)
@@ -1211,6 +1255,8 @@ class LeggedRobot(BaseTask):
                     print(f"PD gain of joint {name} were not defined, setting them to zero")
         self.default_dof_pos = self.default_dof_pos.unsqueeze(0)
         self._init_goal_state_buffers()
+        if getattr(self, "deploy_reset_enabled", False):
+            self._init_deploy_reset_buffers()
 
         self.original_obs_buf = torch.cat(
             (self.base_lin_acc, self.rpy, self.base_ang_vel, self.dof_pos, self.dof_vel, self.contact_filt),
@@ -1243,6 +1289,57 @@ class LeggedRobot(BaseTask):
             if value is not None:
                 default_noise[key] = float(value)
         self.goal_state_noise = default_noise
+
+    def _init_deploy_reset_buffers(self):
+        """Prepare tensors for deploy-aligned reset spawning."""
+        if self.deploy_reset_cfg is None:
+            self.deploy_root_state = None
+            self.deploy_dof_pos = None
+            return
+        reset_cfg = self.deploy_reset_cfg
+        pos = reset_cfg.get('pos', self.cfg.init_state.pos)
+        rot = reset_cfg.get('rot', self.cfg.init_state.rot)
+        lin_vel = reset_cfg.get('lin_vel', self.cfg.init_state.lin_vel)
+        ang_vel = reset_cfg.get('ang_vel', self.cfg.init_state.ang_vel)
+        root_state_list = list(pos) + list(rot) + list(lin_vel) + list(ang_vel)
+        self.deploy_root_state = to_torch(root_state_list,
+                                          device=self.device,
+                                          requires_grad=False).unsqueeze(0)
+        reset_joint_angles = reset_cfg.get('default_joint_angles', self.cfg.init_state.default_joint_angles)
+        reset_dofs = torch.zeros(self.num_dof, dtype=torch.float, device=self.device, requires_grad=False)
+        for i, name in enumerate(self.dof_names):
+            reset_dofs[i] = reset_joint_angles.get(name, self.cfg.init_state.default_joint_angles[name])
+        self.deploy_dof_pos = reset_dofs.unsqueeze(0)
+        default_noise = {'pos': 0.0, 'rot': 0.0, 'lin_vel': 0.0, 'ang_vel': 0.0, 'joint': 0.0}
+        for key in default_noise.keys():
+            value = self.deploy_reset_noise_cfg.get(key, default_noise[key])
+            if value is not None:
+                default_noise[key] = float(value)
+        self.deploy_reset_noise = default_noise
+
+    def _apply_custom_root_state(self, env_ids, root_state, noise_cfg):
+        """Overwrite root states with optional noise, aligned to env origins."""
+        count = env_ids.shape[0]
+        states = root_state.repeat(count, 1)
+        states[:, :3] += self.env_origins[env_ids]
+        pos_noise = noise_cfg.get('pos', 0.0)
+        if pos_noise > 0.0:
+            states[:, :3] += torch_rand_float(-pos_noise, pos_noise, (count, 3), device=self.device)
+        base_quat = states[:, 3:7].clone()
+        rot_noise = noise_cfg.get('rot', 0.0)
+        if rot_noise > 0.0:
+            noise_angles = torch_rand_float(-rot_noise, rot_noise, (count, 3), device=self.device)
+            noise_quat = quat_from_euler_xyz(noise_angles[:, 0], noise_angles[:, 1], noise_angles[:, 2])
+            base_quat = quat_mul(base_quat, noise_quat)
+            base_quat = base_quat / torch.norm(base_quat, dim=1, keepdim=True).clamp(min=1e-9)
+        states[:, 3:7] = base_quat
+        lin_noise = noise_cfg.get('lin_vel', 0.0)
+        if lin_noise > 0.0:
+            states[:, 7:10] += torch_rand_float(-lin_noise, lin_noise, (count, 3), device=self.device)
+        ang_noise = noise_cfg.get('ang_vel', 0.0)
+        if ang_noise > 0.0:
+            states[:, 10:13] += torch_rand_float(-ang_noise, ang_noise, (count, 3), device=self.device)
+        self.root_states[env_ids] = states
 
     def _init_custom_buffers(self):
         # initialize body properties

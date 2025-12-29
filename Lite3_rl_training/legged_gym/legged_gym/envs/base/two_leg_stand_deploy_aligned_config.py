@@ -21,10 +21,10 @@ class TwoLegStandDeployAlignedCfg(TwoLegStandStillSafeCfg):
     """Two-leg stand curriculum aligned to the deploy stand-up phase."""
 
     class init_state(TwoLegStandStillSafeCfg.init_state):
-        # Always reset near the deploy stand-up pose (no randomized joint/velocity init).
-        near_goal_init_prob = 1.0
-        near_goal_state = {
-            "pos": [0.0, 0.0, 0.32],
+        # Use a deploy-aligned reset pose without repurposing near-goal init.
+        deploy_reset_prob = 1.0
+        deploy_reset_state = {
+            "pos": [0.0, 0.0, _DEPLOY_STAND_HEIGHT],
             "rot": [
                 -0.00023085526184233324,
                 -0.0032073138974974646,
@@ -48,7 +48,7 @@ class TwoLegStandDeployAlignedCfg(TwoLegStandStillSafeCfg):
                 "HR_Knee_joint": _KNEE_STAND,
             },
         }
-        near_goal_noise = {
+        deploy_reset_noise = {
             "pos": 0.0,
             "rot": 0.0,
             "lin_vel": 0.0,
@@ -67,15 +67,6 @@ class TwoLegStandDeployAlignedCfg(TwoLegStandStillSafeCfg):
         randomize_Kp_factor = False
         randomize_Kd_factor = False
         push_robots = False
-
-    class rewards(TwoLegStandStillSafeCfg.rewards):
-        class curriculum(TwoLegStandStillSafeCfg.rewards.curriculum):
-            phases = []
-            for _phase in TwoLegStandStillSafeCfg.rewards.curriculum.phases:
-                phase = dict(_phase)
-                phase["near_goal_init_prob"] = 1.0
-                phases.append(phase)
-
 
 class TwoLegStandDeployAlignedCfgPPO(TwoLegStandStillSafeCfgPPO):
     class runner(TwoLegStandStillSafeCfgPPO.runner):
