@@ -268,6 +268,18 @@ def register(task_name, task_registry):
             TwoLegStandStillSafeCfg(),
             TwoLegStandStillSafeCfgPPO(),
         )
+    elif task_name in ('lite3_two_leg_stand_deploy_aligned', 'two_leg_stand_deploy_aligned'):
+        from legged_gym.envs.base.legged_robot import LeggedRobot
+        from legged_gym.envs.base.two_leg_stand_deploy_aligned_config import (
+            TwoLegStandDeployAlignedCfg,
+            TwoLegStandDeployAlignedCfgPPO,
+        )
+        task_registry.register(
+            "lite3_two_leg_stand_deploy_aligned",
+            LeggedRobot,
+            TwoLegStandDeployAlignedCfg(),
+            TwoLegStandDeployAlignedCfgPPO(),
+        )
 
     else:
-        raise Exception("no such task_name. Possible names are: lite3, lite3_two_leg_stand, lite3_two_leg_stand_still, lite3_two_leg_stand_still_v2, lite3_two_leg_stand_still_safe")
+        raise Exception("no such task_name. Possible names are: lite3, lite3_two_leg_stand, lite3_two_leg_stand_still, lite3_two_leg_stand_still_v2, lite3_two_leg_stand_still_safe, lite3_two_leg_stand_deploy_aligned")

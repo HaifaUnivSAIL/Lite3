@@ -24,7 +24,12 @@ def parse_args():
     parser.add_argument("--history-len", type=int, default=40, help="Observation history length.")
     parser.add_argument("--obs-dim", type=int, default=117, help="Single-frame observation dimension.")
     parser.add_argument("--all-history", action="store_true", help="Print stats for every history frame.")
-    parser.add_argument("--root", type=Path, default=Path("."), help="Directory containing dumps.")
+    parser.add_argument(
+        "--root",
+        type=Path,
+        default=Path(__file__).resolve().parent,
+        help="Directory containing dumps.",
+    )
     return parser.parse_args()
 
 

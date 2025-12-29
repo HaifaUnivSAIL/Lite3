@@ -35,6 +35,30 @@ def play(args):
     # env_cfg.terrain.selected = True
     # env_cfg.terrain.mesh_type = 'trimesh'
     env_cfg.commands.fixed_commands = [0.8, 0.0, 0.0]
+    fixed_cmd_env = os.getenv("LITE3_FIXED_CMD")
+    if fixed_cmd_env:
+        token = fixed_cmd_env.strip().lower()
+        if token in ("none", "off", "disable"):
+            env_cfg.commands.fixed_commands = None
+        else:
+            parts = fixed_cmd_env.replace(",", " ").split()
+            if len(parts) >= 3:
+                try:
+                    env_cfg.commands.fixed_commands = [float(parts[0]), float(parts[1]), float(parts[2])]
+                except ValueError:
+                    print(f"[play.py] Invalid LITE3_FIXED_CMD='{fixed_cmd_env}', keeping default.")
+
+    if os.getenv("LITE3_DISABLE_NEAR_GOAL", "0") not in ("0", "", "false", "False"):
+        env_cfg.init_state.near_goal_init_prob = 0.0
+
+    if os.getenv("LITE3_DISABLE_DOMAIN_RAND", "0") not in ("0", "", "false", "False"):
+        env_cfg.domain_rand.randomize_friction = False
+        env_cfg.domain_rand.randomize_base_mass = False
+        env_cfg.domain_rand.randomize_com_offset = False
+        env_cfg.domain_rand.randomize_motor_strength = False
+        env_cfg.domain_rand.randomize_Kp_factor = False
+        env_cfg.domain_rand.randomize_Kd_factor = False
+        env_cfg.domain_rand.push_robots = False
     # env_cfg.viewer.debug_viz = True
     # env_cfg.terrain.terrain_length = 8
     # env_cfg.terrain.terrain_width = 8
@@ -83,8 +107,53 @@ def play(args):
     ppo_runner, train_cfg = task_registry.make_alg_runner(env=env, name=args.task, args=args, train_cfg=train_cfg)
     policy = ppo_runner.get_inference_policy(device=env.device)
 
+    if os.getenv("LITE3_DEBUG_DEFAULT_RESET", "0") not in ("0", "", "false", "False"):
+        try:
+            from isaacgym import gymtorch
+        except Exception as exc:
+            print(f"[play.py] Failed to import gymtorch for debug reset: {exc}")
+        else:
+            base_env = getattr(env, "env", env)
+            if hasattr(base_env, "gym") and hasattr(base_env, "dof_state"):
+                env_ids = torch.arange(base_env.num_envs, device=base_env.device)
+                base_env.dof_pos[env_ids] = base_env.default_dof_pos
+                base_env.dof_vel[env_ids] = 0.0
+                base_env.root_states[env_ids] = base_env.base_init_state
+                base_env.root_states[env_ids, :3] += base_env.env_origins[env_ids]
+                base_env.root_states[env_ids, 7:13] = 0.0
+                env_ids_int32 = env_ids.to(dtype=torch.int32)
+                base_env.gym.set_dof_state_tensor_indexed(
+                    base_env.sim,
+                    gymtorch.unwrap_tensor(base_env.dof_state),
+                    gymtorch.unwrap_tensor(env_ids_int32),
+                    len(env_ids_int32),
+                )
+                base_env.gym.set_actor_root_state_tensor_indexed(
+                    base_env.sim,
+                    gymtorch.unwrap_tensor(base_env.root_states),
+                    gymtorch.unwrap_tensor(env_ids_int32),
+                    len(env_ids_int32),
+                )
+                base_env.gym.refresh_dof_state_tensor(base_env.sim)
+                base_env.gym.refresh_actor_root_state_tensor(base_env.sim)
+                if hasattr(env, "obs_history"):
+                    env.obs_history[:] = 0
+
     obs_dict = env.get_observations()
-    obs, privileged_obs, obs_history = obs_dict["obs"], obs_dict["privileged_obs"], obs_dict["obs_history"]    
+    obs, privileged_obs, obs_history = obs_dict["obs"], obs_dict["privileged_obs"], obs_dict["obs_history"]
+    debug_dump_quota = 0
+    debug_env = os.getenv("LITE3_DEBUG_DUMPS")
+    if debug_env:
+        try:
+            debug_dump_quota = max(0, int(debug_env))
+        except ValueError:
+            print(f"[play.py] Invalid LITE3_DEBUG_DUMPS='{debug_env}', disabling dumps.")
+    dump_root = None
+    if debug_dump_quota > 0:
+        dump_root = os.getenv("LITE3_DEBUG_DUMP_DIR")
+        if not dump_root:
+            dump_root = os.path.join(os.path.dirname(LEGGED_GYM_ROOT_DIR), "debug_training_obs")
+        os.makedirs(dump_root, exist_ok=True)
     if record_policy_output:
         csv_header = [str(i) for i in range(env.num_policy_outputs)]
         with open(os.path.join(LEGGED_GYM_ROOT_DIR, 'logs', train_cfg.runner.experiment_name, args.load_run,
@@ -97,11 +166,7 @@ def play(args):
         with torch.no_grad():
             actions = policy(obs, obs_history)
             # --- Debug export of obs/action for deployment comparison ---
-            if i < 10:
-                import numpy as np, os
-                # Save next to the repo root (Lite3_rl_training/debug_training_obs)
-                dump_root = os.path.join(os.path.dirname(LEGGED_GYM_ROOT_DIR), "debug_training_obs")
-                os.makedirs(dump_root, exist_ok=True)
+            if debug_dump_quota > 0 and i < debug_dump_quota:
                 np.savez(
                     os.path.join(dump_root, f"step_{i:02d}.npz"),
                     obs=obs.cpu().numpy(),
