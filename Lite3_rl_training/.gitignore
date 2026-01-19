@@ -93,3 +93,8 @@ isaacgym
 .vscode
 logs/*
 legged_gym/logs/*
+
+# Debug artifacts: ignore everything under debug_training_obs except python sources
+debug_training_obs/**
+!debug_training_obs/**/
+!debug_training_obs/**/*.py
