@@ -292,11 +292,13 @@ def reset_to_near_goal_state(
                 asset.data.joint_vel[near_goal_ids, jid] = torch.randn(len(near_goal_ids), device=env.device) * vel_noise
 
     # Write to simulation
-    asset.write_root_pose_to_sim(asset.data.root_state_w[:, :7], env_ids=near_goal_ids)
-    asset.write_root_velocity_to_sim(asset.data.root_state_w[:, 7:], env_ids=near_goal_ids)
+    asset.write_root_pose_to_sim(asset.data.root_state_w[near_goal_ids, :7], env_ids=near_goal_ids)
+    asset.write_root_velocity_to_sim(asset.data.root_state_w[near_goal_ids, 7:], env_ids=near_goal_ids)
+    joint_pos = asset.data.joint_pos.clone()
+    joint_vel = asset.data.joint_vel.clone()
     asset.write_joint_state_to_sim(
-        asset.data.joint_pos,
-        asset.data.joint_vel,
+        joint_pos[near_goal_ids],
+        joint_vel[near_goal_ids],
         env_ids=near_goal_ids
     )
 

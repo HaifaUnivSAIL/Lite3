@@ -31,6 +31,8 @@
 
 import time
 import os
+import json
+import numpy as np
 from collections import deque
 import statistics
 import csv
@@ -87,6 +89,11 @@ class OnPolicyRunner:
         self.env = env
         self.save_rewards = save_rewards
         self.csv_header = None
+        self._debug_dump_quota = _parse_int_env("LITE3_DEBUG_TRAIN_DUMPS", default=0)
+        self._debug_dump_every = max(1, _parse_int_env("LITE3_DEBUG_DUMP_EVERY", default=1))
+        self._debug_dump_full = _parse_bool_env("LITE3_DEBUG_DUMP_FULL", default=False)
+        self._debug_dump_counter = 0
+        self._debug_dump_dir = None
 
         actor_critic_class = eval(self.cfg["policy_class_name"])  # ActorCritic
         policy_kwargs = _filter_kwargs(self.policy_cfg, actor_critic_class)
@@ -112,6 +119,9 @@ class OnPolicyRunner:
         if self.log_dir:
             self.exported_path = os.path.join(self.log_dir, "exported")
             os.makedirs(self.exported_path, exist_ok=True)
+            if self._debug_dump_quota > 0:
+                self._debug_dump_dir = os.getenv("LITE3_DEBUG_DUMP_DIR") or os.path.join(self.log_dir, "debug_dumps")
+                os.makedirs(self._debug_dump_dir, exist_ok=True)
         else:
             self.exported_path = None
         self.tot_timesteps = 0
@@ -311,6 +321,7 @@ class OnPolicyRunner:
             goal_prob_line = f"""{'Near goal init prob:':>{pad}} {near_goal_prob:.2f}\n"""
 
         ep_string = f''
+        reward_term_means = {}
         reward_row = None
         if locs['ep_infos']:
             active_reward_names = self._get_active_reward_names()
@@ -337,9 +348,10 @@ class OnPolicyRunner:
                 reward_row.append(value.cpu().numpy())  # record rewards
                 if key.startswith("rew_"):
                     reward_name = key[4:]
+                    reward_term_means[reward_name] = float(value)
                     if active_reward_names is not None and reward_name not in active_reward_names:
                         continue
-                    ep_string += f"""{f'Mean episode {key}:':>{pad}} {value:.4f}\n"""
+                    ep_string += f"""{f'Mean episode {key}:':>{pad}} {value:.3e} (x1e6: {value * 1.0e6:.3f})\n"""
         else:
             # Fallback: Isaac Lab reward manager episode sums (prints only active terms).
             active_reward_names = self._get_active_reward_names()
@@ -355,10 +367,11 @@ class OnPolicyRunner:
                     if active_reward_names is not None and name not in active_reward_names:
                         continue
                     try:
-                        value = torch.mean(tensor).item()
+                        value = float(torch.mean(tensor).item())
                     except Exception:
                         continue
-                    ep_string += f"""{f'Mean episode rew_{name}:':>{pad}} {value:.4f}\n"""
+                    reward_term_means[name] = value
+                    ep_string += f"""{f'Mean episode rew_{name}:':>{pad}} {value:.3e} (x1e6: {value * 1.0e6:.3f})\n"""
 
             # write each reward item into a csv file
             if reward_row is not None:
@@ -421,6 +434,84 @@ class OnPolicyRunner:
                                self.current_learning_iteration + locs['num_learning_iterations'] - locs['it']):.1f}s\n"""
                       )
         print(log_string)
+        self._maybe_dump_debug(
+            locs=locs,
+            phase_name=phase_name,
+            near_goal_prob=near_goal_prob,
+            reward_term_means=reward_term_means,
+        )
+
+    def _maybe_dump_debug(self, locs, phase_name, near_goal_prob, reward_term_means):
+        if self._debug_dump_quota <= 0 or self._debug_dump_dir is None:
+            return
+        if locs['it'] % self._debug_dump_every != 0:
+            return
+        if self._debug_dump_counter >= self._debug_dump_quota:
+            return
+        self._debug_dump_counter += 1
+
+        def _to_cpu_numpy(value):
+            if isinstance(value, torch.Tensor):
+                return value.detach().cpu().numpy()
+            return value
+
+        env = None
+        for candidate in (self.env, getattr(self.env, "env", None), getattr(self.env, "unwrapped", None)):
+            if candidate is not None:
+                env = candidate
+                break
+
+        reward_weights = {}
+        reward_manager = getattr(env, "reward_manager", None) if env is not None else None
+        if reward_manager is not None and hasattr(reward_manager, "get_term_cfg"):
+            for name in reward_term_means.keys():
+                try:
+                    term_cfg = reward_manager.get_term_cfg(name)
+                    reward_weights[name] = float(getattr(term_cfg, "weight", 0.0))
+                except Exception:
+                    reward_weights[name] = None
+
+        summary = {
+            "iteration": int(locs["it"]),
+            "total_timesteps": int(self.tot_timesteps),
+            "phase": phase_name,
+            "near_goal_init_prob": float(near_goal_prob) if near_goal_prob is not None else None,
+            "mean_reward": statistics.mean(locs["rewbuffer"]) if len(locs["rewbuffer"]) > 0 else None,
+            "mean_episode_length": statistics.mean(locs["lenbuffer"]) if len(locs["lenbuffer"]) > 0 else None,
+            "collection_time": float(locs["collection_time"]),
+            "learn_time": float(locs["learn_time"]),
+            "mean_value_loss": float(locs["mean_value_loss"]),
+            "mean_surrogate_loss": float(locs["mean_surrogate_loss"]),
+            "mean_adaptation_loss": float(locs["mean_adaptation_loss"]),
+            "mean_action_noise_std": float(self.alg.actor_critic.std.mean().item()),
+            "reward_terms": reward_term_means,
+            "reward_weights": reward_weights,
+        }
+
+        json_path = os.path.join(self._debug_dump_dir, f"iter_{locs['it']:06d}.json")
+        with open(json_path, "w") as f:
+            json.dump(summary, f, indent=2, sort_keys=True)
+
+        if not self._debug_dump_full:
+            return
+
+        obs = _to_cpu_numpy(locs.get("obs"))
+        privileged_obs = _to_cpu_numpy(locs.get("privileged_obs"))
+        obs_history = _to_cpu_numpy(locs.get("obs_history"))
+        actions = _to_cpu_numpy(locs.get("actions"))
+        rewards = _to_cpu_numpy(locs.get("rewards"))
+        dones = _to_cpu_numpy(locs.get("dones"))
+
+        npz_path = os.path.join(self._debug_dump_dir, f"iter_{locs['it']:06d}.npz")
+        np.savez(
+            npz_path,
+            obs=obs,
+            privileged_obs=privileged_obs,
+            obs_history=obs_history,
+            actions=actions,
+            rewards=rewards,
+            dones=dones,
+        )
 
     def save(self, path, infos=None, iteration=None):
         if iteration is None:
@@ -504,3 +595,20 @@ def _filter_kwargs(kwargs, cls):
         return {k: v for k, v in kwargs.items() if k in allowed}
     except Exception:
         return dict(kwargs)
+
+
+def _parse_int_env(key, default=0):
+    value = os.getenv(key)
+    if value is None:
+        return default
+    try:
+        return int(value)
+    except ValueError:
+        return default
+
+
+def _parse_bool_env(key, default=False):
+    value = os.getenv(key)
+    if value is None:
+        return default
+    return value.strip().lower() in ("1", "true", "yes", "y", "on")

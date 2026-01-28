@@ -132,6 +132,31 @@ python scripts/reinforcement_learning/rsl_rl/train.py --help
 python scripts/reinforcement_learning/rsl_rl/play.py --help
 ```
 
+### Debug dumps (training)
+
+Enable per-iteration debug dumps for rewards and key signals:
+
+- LITE3_DEBUG_TRAIN_DUMPS: number of iterations to dump (0 disables)
+- LITE3_DEBUG_DUMP_EVERY: dump every N iterations (default 1)
+- LITE3_DEBUG_DUMP_DIR: override output directory (default: logs/.../debug_dumps)
+- LITE3_DEBUG_DUMP_FULL: if set, also writes a .npz with tensors from the last step
+
+Example (dump 5 iterations, every 10 iters, plus full tensors):
+
+```bash
+LITE3_DEBUG_TRAIN_DUMPS=5 \
+LITE3_DEBUG_DUMP_EVERY=10 \
+LITE3_DEBUG_DUMP_FULL=1 \
+python scripts/reinforcement_learning/rsl_rl/train.py \
+  --task=TwoLegStandDeployR1-Deeprobotics-Lite3-v0 \
+  --headless
+```
+
+Each dump writes:
+
+- `iter_XXXXXX.json`: scalar summary (losses, phase, reward means, weights)
+- `iter_XXXXXX.npz` (optional): obs, privileged_obs, obs_history, actions, rewards, dones
+
 ## Stack B: Legacy legged_gym
 
 All commands below assume:
@@ -199,3 +224,29 @@ For legacy logs, you can also point at:
 ```
 tensorboard --logdir=legged_gym/logs
 ```
+
+## Current experiment focused command
+
+Use this exact pair to train and then play the same run (deploy/r1 task).
+
+Train:
+
+```bash
+python scripts/reinforcement_learning/rsl_rl/train.py \
+  --task=TwoLegStandDeployR1-Deeprobotics-Lite3-v0 \
+  --run_name demo_r1 \
+  --headless
+```
+
+Play (same run_name):
+
+```bash
+python scripts/reinforcement_learning/rsl_rl/play.py \
+  --task=TwoLegStandDeployR1-Deeprobotics-Lite3-v0 \
+  --load_run <timestamp>_demo_r1 \
+  --checkpoint model_best.pt
+```
+
+Notes:
+- `<timestamp>_demo_r1` must match the run folder created during training, e.g. `2026-01-28_12-34-56_demo_r1`.
+- The experiment folder is `logs/rsl_rl/deploy/` for this task (from the agent config).
