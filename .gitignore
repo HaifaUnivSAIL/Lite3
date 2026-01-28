@@ -14,3 +14,7 @@ Lite3_rl_training/wandb/templates/*
 !Lite3_rl_training/debug_training_obs/*.py
 Lite3_rl_training/debug_training_obs
 
+
+# Local dev
+.vscode/
+*.log
