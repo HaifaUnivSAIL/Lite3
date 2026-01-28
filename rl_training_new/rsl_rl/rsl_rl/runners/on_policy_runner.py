@@ -251,6 +251,27 @@ class OnPolicyRunner:
         env = self.env.env if hasattr(self.env, "env") else self.env
         if env is None:
             return None
+        # Prefer Isaac Lab reward manager weights when available.
+        reward_manager = getattr(env, "reward_manager", None)
+        if reward_manager is not None and hasattr(reward_manager, "get_term_cfg"):
+            term_names = list(getattr(reward_manager, "_episode_sums", {}).keys())
+            active = set()
+            for name in term_names:
+                try:
+                    term_cfg = reward_manager.get_term_cfg(name)
+                except Exception:
+                    continue
+                weight = getattr(term_cfg, "weight", None)
+                if weight is None:
+                    continue
+                try:
+                    if float(weight) != 0.0:
+                        active.add(name)
+                except Exception:
+                    active.add(name)
+            return active or None
+
+        # Legacy fallback using reward_scales/curriculum_controller.
         reward_scales = getattr(env, "reward_scales", None)
         base_active = None
         if reward_scales is not None:
@@ -290,6 +311,7 @@ class OnPolicyRunner:
             goal_prob_line = f"""{'Near goal init prob:':>{pad}} {near_goal_prob:.2f}\n"""
 
         ep_string = f''
+        reward_row = None
         if locs['ep_infos']:
             active_reward_names = self._get_active_reward_names()
             if self.save_rewards is True and self.csv_header is None:
@@ -313,16 +335,35 @@ class OnPolicyRunner:
                 if self.writer is not None:
                     self.writer.add_scalar('Episode/' + key, value, locs['it'])
                 reward_row.append(value.cpu().numpy())  # record rewards
-                should_print = True
-                if key.startswith("rew_") and active_reward_names is not None:
+                if key.startswith("rew_"):
                     reward_name = key[4:]
-                    should_print = reward_name in active_reward_names
-                if should_print:
+                    if active_reward_names is not None and reward_name not in active_reward_names:
+                        continue
                     ep_string += f"""{f'Mean episode {key}:':>{pad}} {value:.4f}\n"""
+        else:
+            # Fallback: Isaac Lab reward manager episode sums (prints only active terms).
+            active_reward_names = self._get_active_reward_names()
+            env = None
+            for candidate in (self.env, getattr(self.env, "env", None), getattr(self.env, "unwrapped", None)):
+                if candidate is not None and hasattr(candidate, "reward_manager"):
+                    env = candidate
+                    break
+            reward_manager = getattr(env, "reward_manager", None) if env is not None else None
+            episode_sums = getattr(reward_manager, "_episode_sums", None) if reward_manager is not None else None
+            if isinstance(episode_sums, dict) and episode_sums:
+                for name, tensor in episode_sums.items():
+                    if active_reward_names is not None and name not in active_reward_names:
+                        continue
+                    try:
+                        value = torch.mean(tensor).item()
+                    except Exception:
+                        continue
+                    ep_string += f"""{f'Mean episode rew_{name}:':>{pad}} {value:.4f}\n"""
 
             # write each reward item into a csv file
-            reward_row.append(statistics.mean(locs['rewbuffer']) if len(locs['rewbuffer']) != 0 else 0.)
-            if self.save_rewards is True:
+            if reward_row is not None:
+                reward_row.append(statistics.mean(locs['rewbuffer']) if len(locs['rewbuffer']) != 0 else 0.)
+            if self.save_rewards is True and reward_row is not None:
                 assert len(reward_row) == len(self.csv_header)
                 with open(os.path.join(self.log_dir, 'rewards.csv'), 'a', newline='') as f:
                     writer = csv.writer(f)

@@ -12,6 +12,7 @@ from .base_env_cfg import (
     Lite3TwoLegStandStillV2EnvCfg,
     Lite3TwoLegStandSafeEnvCfg,
     Lite3TwoLegStandDeployAlignedEnvCfg,
+    Lite3TwoLegStandDeployR1EnvCfg,
 )
 
 ##
@@ -73,6 +74,17 @@ gym.register(
     },
 )
 
+# Two-leg standing deploy/r1 (matches Lite3_rl_training log config)
+gym.register(
+    id="TwoLegStandDeployR1-Deeprobotics-Lite3-v0",
+    entry_point="isaaclab.envs:ManagerBasedRLEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": f"{__name__}.base_env_cfg:Lite3TwoLegStandDeployR1EnvCfg",
+        "rsl_rl_cfg_entry_point": f"{agents.__name__}.rsl_rl_ppo_cfg:Lite3TwoLegStandDeployR1PPORunnerCfg",
+    },
+)
+
 ##
 # Legacy task IDs (Lite3_rl_training compatibility)
 ##
@@ -124,6 +136,16 @@ gym.register(
     kwargs={
         "env_cfg_entry_point": f"{__name__}.base_env_cfg:Lite3TwoLegStandDeployAlignedEnvCfg",
         "rsl_rl_cfg_entry_point": f"{agents.__name__}.rsl_rl_ppo_cfg:Lite3TwoLegStandDeployAlignedPPORunnerCfg",
+    },
+)
+
+gym.register(
+    id="lite3_two_leg_stand_deploy_r1",
+    entry_point="isaaclab.envs:ManagerBasedRLEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": f"{__name__}.base_env_cfg:Lite3TwoLegStandDeployR1EnvCfg",
+        "rsl_rl_cfg_entry_point": f"{agents.__name__}.rsl_rl_ppo_cfg:Lite3TwoLegStandDeployR1PPORunnerCfg",
     },
 )
 

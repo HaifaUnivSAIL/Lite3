@@ -15,7 +15,9 @@ Isaac Lab stack (ManagerBasedRLEnv, registered in rl_training tasks):
 - TwoLegStandStillV2-Deeprobotics-Lite3-v0
 - TwoLegStandSafe-Deeprobotics-Lite3-v0
 - TwoLegStandDeployAligned-Deeprobotics-Lite3-v0
+- TwoLegStandDeployR1-Deeprobotics-Lite3-v0
 - Legacy aliases: lite3_two_leg_stand, lite3_two_leg_stand_still, lite3_two_leg_stand_still_v2, lite3_two_leg_stand_still_safe, lite3_two_leg_stand_deploy_aligned
+- Legacy alias (deploy/r1): lite3_two_leg_stand_deploy_r1
 
 Legacy legged_gym stack (registered in legged_gym helpers):
 - lite3_two_leg_stand
@@ -38,6 +40,25 @@ cd /home/sail/Lite3/rl_training_new
 python scripts/reinforcement_learning/rsl_rl/train.py \
   --task=TwoLegStand-Deeprobotics-Lite3-v0 \
   --headless
+```
+
+### Train (deploy/r1 curriculum, matches Lite3_rl_training logs/deploy/r1)
+
+```bash
+python scripts/reinforcement_learning/rsl_rl/train.py \
+  --task=TwoLegStandDeployR1-Deeprobotics-Lite3-v0 \
+  --headless
+```
+
+### Resume (deploy/r1 from a specific checkpoint)
+
+```bash
+python scripts/reinforcement_learning/rsl_rl/train.py \
+  --task=TwoLegStandDeployR1-Deeprobotics-Lite3-v0 \
+  --headless \
+  --resume \
+  --load_run r1 \
+  --checkpoint model_14500.pt
 ```
 
 ### Naming and resume flags (important)
@@ -76,6 +97,15 @@ python scripts/reinforcement_learning/rsl_rl/play.py \
   --task=TwoLegStand-Deeprobotics-Lite3-v0 \
   --load_run <run_folder> \
   --checkpoint <model_XXXX.pt>
+```
+
+### Play (deploy/r1 example)
+
+```bash
+python scripts/reinforcement_learning/rsl_rl/play.py \
+  --task=TwoLegStandDeployR1-Deeprobotics-Lite3-v0 \
+  --load_run r1 \
+  --checkpoint model_best.pt
 ```
 
 Helpful play flags:

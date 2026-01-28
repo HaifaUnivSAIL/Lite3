@@ -76,3 +76,24 @@ class Lite3TwoLegStandDeployAlignedPPORunnerCfg(Lite3TwoLegStandSafePPORunnerCfg
     def __post_init__(self):
         super().__post_init__()
         self.experiment_name = "two_leg_stand_deploy_aligned"
+
+
+@configclass
+class Lite3TwoLegStandDeployR1PPORunnerCfg(Lite3TwoLegStandDeployAlignedPPORunnerCfg):
+    """PPO runner configuration matching Lite3_rl_training deploy/r1."""
+
+    def __post_init__(self):
+        super().__post_init__()
+        self.experiment_name = "deploy"
+        self.run_name = "r1"
+        self.num_steps_per_env = 24
+        self.max_iterations = 15000
+        self.save_interval = 500
+        self.seed = 2024
+        # Mirror legacy resume settings (can be overridden from CLI).
+        self.resume = False
+        self.load_run = "r1"
+        self.load_checkpoint = "model_14500.pt"
+        # Explicitly mirror adaptation network config
+        self.policy.adaptation_hidden_dims = [256, 32]
+        self.policy.encoder_latent_dims = 18

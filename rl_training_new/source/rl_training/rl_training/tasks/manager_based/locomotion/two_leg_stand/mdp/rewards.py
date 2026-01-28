@@ -916,11 +916,11 @@ def torque_limits(
     """Penalize torques exceeding soft limits."""
     asset: Articulation = env.scene[asset_cfg.name]
     torques = asset.data.applied_torque
-    torque_limits = (
-        getattr(asset.data, "joint_effort_limits", None)
-        or getattr(asset.data, "joint_torque_limits", None)
-        or getattr(asset.data, "actuator_effort_limits", None)
-    )
+    torque_limits = getattr(asset.data, "joint_effort_limits", None)
+    if torque_limits is None:
+        torque_limits = getattr(asset.data, "joint_torque_limits", None)
+    if torque_limits is None:
+        torque_limits = getattr(asset.data, "actuator_effort_limits", None)
     if torque_limits is None:
         return torch.sum(torch.square(torques), dim=1)
     if torque_limits.dim() == 1:
@@ -937,7 +937,9 @@ def dof_vel_limits(
     """Penalize joint velocities exceeding soft limits."""
     asset: Articulation = env.scene[asset_cfg.name]
     vel = asset.data.joint_vel
-    vel_limits = getattr(asset.data, "soft_joint_vel_limits", None) or getattr(asset.data, "joint_vel_limits", None)
+    vel_limits = getattr(asset.data, "soft_joint_vel_limits", None)
+    if vel_limits is None:
+        vel_limits = getattr(asset.data, "joint_vel_limits", None)
     if vel_limits is None:
         return torch.sum(torch.square(vel), dim=1)
     if vel_limits.dim() == 1:

@@ -289,14 +289,14 @@ class TwoLegStandObservationsCfg:
 
         mass_payload = ObsTerm(
             func=mdp.mass_payload,
-            params={"asset_cfg": SceneEntityCfg("robot", body_names="base")},
+            params={"asset_cfg": SceneEntityCfg("robot", body_names=["TORSO"])},
             clip=(-100.0, 100.0),
             scale=0.5,
         )
 
         com_displacement = ObsTerm(
             func=mdp.com_displacement,
-            params={"asset_cfg": SceneEntityCfg("robot", body_names="base")},
+            params={"asset_cfg": SceneEntityCfg("robot", body_names=["TORSO"])},
             clip=(-100.0, 100.0),
             scale=20.0,
         )
@@ -353,7 +353,7 @@ class TwoLegStandEventCfg:
         func=base_mdp.randomize_rigid_body_mass,
         mode="startup",
         params={
-            "asset_cfg": SceneEntityCfg("robot", body_names="base"),
+            "asset_cfg": SceneEntityCfg("robot", body_names=["TORSO"]),
             "mass_distribution_params": (-1.0, 3.0),
             "operation": "add",
             "recompute_inertia": True,
@@ -423,7 +423,7 @@ class TwoLegStandEventCfg:
         mode="interval",
         interval_range_s=(15.0, 15.0),
         params={
-            "asset_cfg": SceneEntityCfg("robot", body_names=["base"]),
+            "asset_cfg": SceneEntityCfg("robot", body_names=["TORSO"]),
             "max_force": 10.0,
             "max_torque": 10.0,
             "max_vel_xy": 0.5,
@@ -478,8 +478,6 @@ class TwoLegStandEventCfg:
 @configclass
 class TwoLegStandRewardsCfg:
     """Reward terms for two-leg standing."""
-
-    only_positive_rewards: bool = True
 
     # Termination penalty
     is_terminated = RewTerm(func=base_mdp.is_terminated, weight=-10.0)
@@ -876,7 +874,7 @@ class TwoLegStandTerminationsCfg:
     illegal_contact = DoneTerm(
         func=base_mdp.illegal_contact,
         params={
-            "sensor_cfg": SceneEntityCfg("contact_forces", body_names=["base"]),
+            "sensor_cfg": SceneEntityCfg("contact_forces", body_names=["TORSO"]),
             "threshold": 1.0,
         },
     )
@@ -939,6 +937,7 @@ class TwoLegStandCurriculumCfg:
 class TwoLegStandEnvCfg(ManagerBasedRLEnvCfg):
     """Configuration for the two-leg standing environment."""
 
+    only_positive_rewards: bool = True
     num_privileged_obs: int = 54
     num_observation_history: int = 40
 

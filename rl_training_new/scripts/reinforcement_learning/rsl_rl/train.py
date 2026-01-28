@@ -128,7 +128,9 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
     env = gym.make(args_cli.task, cfg=env_cfg, render_mode="rgb_array" if args_cli.video else None)
 
     # prepare optional reward clipping and observation history
-    only_positive_rewards = getattr(getattr(env_cfg, "rewards", None), "only_positive_rewards", False)
+    only_positive_rewards = getattr(env_cfg, "only_positive_rewards", None)
+    if only_positive_rewards is None:
+        only_positive_rewards = getattr(getattr(env_cfg, "rewards", None), "only_positive_rewards", False)
     term_weight = None
     if only_positive_rewards:
         if getattr(env_cfg, "rewards", None) is not None and getattr(env_cfg.rewards, "is_terminated", None) is not None:

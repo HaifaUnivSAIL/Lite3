@@ -141,6 +141,29 @@ class TwoLegStandCurriculumManager:
         self._update_current_phase()
 
 
+class LegacyCurriculumShim:
+    """Shim to expose curriculum state in legacy legged_gym-style API."""
+
+    def __init__(self, phases: list[CurriculumPhase]) -> None:
+        self.enabled = True
+        self.phases = [
+            {
+                "name": p.name,
+                "trigger_thresh": p.trigger_thresh,
+                "near_goal_init_prob": p.near_goal_init_prob,
+                "reward_scales": p.reward_scales,
+            }
+            for p in phases
+        ]
+        self.current_phase = 0
+        self.current_scales: dict[str, float] = {}
+        self.progress_buf = 0
+
+    def get_progress_buf(self, buf_element):
+        # Stored for compatibility; progression handled by IsaacLab curriculum.
+        self.progress_buf = buf_element
+
+
 # =============================================================================
 # Default Phase Configurations
 # =============================================================================
@@ -575,6 +598,171 @@ def get_two_leg_stand_safe_phases() -> list[CurriculumPhase]:
     ]
 
 
+def get_two_leg_stand_deploy_r1_phases() -> list[CurriculumPhase]:
+    """Get curriculum phases matching Lite3_rl_training deploy/r1 run."""
+    return [
+        CurriculumPhase(
+            name="phase_0_legs_up_safe_warmup",
+            trigger_thresh=0,
+            near_goal_init_prob=0.0,
+            reward_scales={
+                "front_legs_up_warmup_safe": 18.0,
+                "torso_upright_warmup": 8.0,
+                "base_height_bonus": 6.0,
+                "hind_leg_extension_geom": 1.0,
+                "hind_legs_calmness": 0.5,
+                "stand_still_yaw_only": 0.3,
+                "stand_still_roll_only": 0.2,
+                "stand_still_lin_x": 0.2,
+                "stand_still_lin_y": 0.2,
+                "front_tap_penalty": -0.3,
+                "deploy_posture_gate": -5.0,
+                "lin_vel_z": -0.1,
+                "ang_vel_xy": -0.05,
+                "feet_velocity": -0.15,
+                "action_rate": -0.02,
+                "target_smoothness": -0.002,
+                "dof_acc": -2.0e-6,
+                "power": -2.0e-5,
+                "torque_limits": -0.05,
+                "dof_vel_limits": -0.05,
+                "termination": -10.0,
+            },
+        ),
+        CurriculumPhase(
+            name="phase_1_explore_stable_two_leg_safe",
+            trigger_thresh=500,
+            near_goal_init_prob=0.15,
+            reward_scales={
+                "front_legs_up_warmup_safe": 12.0,
+                "front_legs_up_continuous_safe": 6.0,
+                "torso_upright_soften": 8.0,
+                "torso_upright_continuous": 5.0,
+                "base_height_bonus": 8.0,
+                "hind_leg_extension_geom": 3.0,
+                "hind_legs_calmness": 1.5,
+                "stand_still_yaw_only": 0.8,
+                "stand_still_roll_only": 0.4,
+                "stand_still_lin_x": 0.4,
+                "stand_still_lin_y": 0.4,
+                "stand_still_lin_z": 0.2,
+                "two_leg_stability_safe": 1.5,
+                "lin_vel_z": -0.12,
+                "ang_vel_xy": -0.06,
+                "feet_velocity": -0.22,
+                "front_tap_penalty": -1.0,
+                "deploy_posture_gate": -5.0,
+                "action_rate": -0.03,
+                "target_smoothness": -0.004,
+                "dof_acc": -3.0e-6,
+                "power": -4.0e-5,
+                "torque_limits": -0.1,
+                "dof_vel_limits": -0.1,
+                "termination": -10.0,
+            },
+        ),
+        CurriculumPhase(
+            name="phase_2_transition_reduce_spin_safe",
+            trigger_thresh=3000,
+            near_goal_init_prob=0.25,
+            reward_scales={
+                "front_legs_up_warmup_safe": 8.0,
+                "front_legs_up_continuous_safe": 7.0,
+                "torso_upright_soften": 6.0,
+                "torso_upright_continuous": 5.0,
+                "base_height_bonus": 7.0,
+                "hind_leg_extension_geom": 4.0,
+                "human_posture_warmup": 2.5,
+                "hind_legs_calmness": 2.0,
+                "stand_still_yaw_only": 1.5,
+                "stand_still_roll_only": 0.6,
+                "stand_still_lin_x": 0.7,
+                "stand_still_lin_y": 0.7,
+                "stand_still_lin_z": 0.4,
+                "two_leg_stability_safe": 3.0,
+                "lin_vel_z": -0.15,
+                "ang_vel_xy": -0.08,
+                "feet_velocity": -0.3,
+                "front_tap_penalty": -1.8,
+                "deploy_posture_gate": -5.0,
+                "action_rate": -0.04,
+                "target_smoothness": -0.01,
+                "dof_acc": -4.0e-6,
+                "power": -6.0e-5,
+                "torque_limits": -0.15,
+                "dof_vel_limits": -0.15,
+                "termination": -10.0,
+            },
+        ),
+        CurriculumPhase(
+            name="phase_3_refine_still_stand_safe",
+            trigger_thresh=10000,
+            near_goal_init_prob=0.3,
+            reward_scales={
+                "front_legs_up_continuous_safe": 8.0,
+                "torso_upright_continuous": 9.0,
+                "human_posture": 5.0,
+                "hind_leg_extension_geom": 5.0,
+                "hind_legs_calmness": 3.0,
+                "stand_still_yaw_only": 3.5,
+                "stand_still_roll_only": 1.0,
+                "stand_still_lin_x": 1.2,
+                "stand_still_lin_y": 1.2,
+                "stand_still_lin_z": 0.8,
+                "two_leg_stability_safe": 5.0,
+                "lin_vel_z": -0.18,
+                "ang_vel_xy": -0.12,
+                "feet_velocity": -1.5,
+                "front_tap_penalty": -4.0,
+                "base_height_bonus": 6.0,
+                "deploy_posture_gate": -5.0,
+                "action_rate": -0.08,
+                "target_smoothness": -0.04,
+                "dof_vel": -0.002,
+                "dof_acc": -2.0e-5,
+                "power": -0.0002,
+                "torque_limits": -0.35,
+                "dof_vel_limits": -0.5,
+                "feet_contact_forces": -0.05,
+                "termination": -10.0,
+            },
+        ),
+        CurriculumPhase(
+            name="phase_4_final_polish_safe",
+            trigger_thresh=15000,
+            near_goal_init_prob=0.35,
+            reward_scales={
+                "front_legs_up_continuous_safe": 8.0,
+                "torso_upright_continuous": 10.0,
+                "human_posture": 6.0,
+                "hind_leg_extension_geom": 6.0,
+                "hind_legs_calmness": 3.5,
+                "stand_still_yaw_only": 4.0,
+                "stand_still_roll_only": 1.2,
+                "stand_still_lin_x": 1.4,
+                "stand_still_lin_y": 1.4,
+                "stand_still_lin_z": 1.0,
+                "two_leg_stability_safe": 6.0,
+                "lin_vel_z": -0.2,
+                "ang_vel_xy": -0.15,
+                "feet_velocity": -1.8,
+                "front_tap_penalty": -5.0,
+                "base_height_bonus": 6.0,
+                "deploy_posture_gate": -5.0,
+                "action_rate": -0.1,
+                "target_smoothness": -0.06,
+                "dof_vel": -0.003,
+                "dof_acc": -3.0e-5,
+                "power": -0.0003,
+                "torque_limits": -0.45,
+                "dof_vel_limits": -0.6,
+                "feet_contact_forces": -0.08,
+                "termination": -10.0,
+            },
+        ),
+    ]
+
+
 def two_leg_stand_curriculum(
     env: "ManagerBasedRLEnv",
     env_ids,
@@ -593,6 +781,8 @@ def two_leg_stand_curriculum(
         )
         env.front_touch_termination_active = False
         env._two_leg_front_touch_cfg = front_touch_termination or {}
+        # Legacy-style curriculum controller for runner logging.
+        env.curriculum_controller = LegacyCurriculumShim(phases)
 
     steps_per_env = max(int(steps_per_env), 1)
     iteration = int(env.common_step_counter // steps_per_env)
@@ -618,6 +808,16 @@ def two_leg_stand_curriculum(
             term_cfg = None
         if term_cfg is not None:
             term_cfg.params["near_goal_prob"] = near_goal_prob
+    # Expose for legacy logger
+    try:
+        env.goal_state_prob = near_goal_prob
+    except Exception:
+        pass
+
+    # Update legacy-style curriculum state for logging
+    if hasattr(env, "curriculum_controller"):
+        env.curriculum_controller.current_phase = env._two_leg_curriculum.current_phase_idx
+        env.curriculum_controller.current_scales = current_scales
 
     # Enable front-touch termination when metrics exceed thresholds
     front_cfg = env._two_leg_front_touch_cfg

@@ -53,7 +53,12 @@ RUN if [ "$BUILD_ENV" = "server" ]; then \
       pip install -r /tmp/requirements_server.txt; \
     else \
       echo "[Docker] Local build: installing minimal base"; \
-      pip install torch torchvision numpy gymnasium opencv-python; \
+      pip install numpy==1.26.4 torch torchvision gymnasium opencv-python transformations gym==0.26.2 tensordict; \
+    fi
+
+# --- Isaac Sim python wrapper for interactive shells ---
+RUN if ! grep -q "isaac-sim/python.sh" /root/.bashrc 2>/dev/null; then \
+      printf '\n# Isaac Sim python wrapper\npython(){ /isaac-sim/python.sh "$@"; }\npython3(){ /isaac-sim/python.sh "$@"; }\npip(){ /isaac-sim/python.sh -m pip "$@"; }\n' >> /root/.bashrc; \
     fi
 
 # --- Workdir as before ---

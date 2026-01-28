@@ -110,7 +110,7 @@ class Lite3TwoLegStandEnvCfg(TwoLegStandEnvCfg):
 
         # Update termination body names for Lite3
         self.terminations.illegal_contact.params["sensor_cfg"] = SceneEntityCfg(
-            "contact_forces", body_names=["base"]
+            "contact_forces", body_names=["TORSO"]
         )
         # Disable hind-contact termination unless explicitly enabled (safe config).
         self.terminations.hind_contact = None
@@ -398,3 +398,165 @@ class Lite3TwoLegStandDeployAlignedEnvCfg(Lite3TwoLegStandSafeEnvCfg):
             "HR_Knee_joint": knee,
         }
         self.events.reset_to_deploy.params["add_noise"] = False
+
+
+@configclass
+class Lite3TwoLegStandDeployR1EnvCfg(Lite3TwoLegStandDeployAlignedEnvCfg):
+    """Lite3 two-leg standing curriculum matching Lite3_rl_training deploy/r1."""
+
+    def __post_init__(self):
+        super().__post_init__()
+
+        # Match deploy/r1 curriculum phases
+        self.curriculum.phases.params["phases"] = mdp.get_two_leg_stand_deploy_r1_phases()
+        self.curriculum.phases.params["steps_per_env"] = 24
+        self.curriculum.phases.params["front_touch_termination"] = {
+            "enabled": False,
+            "metrics": {"two_leg_stability": 0.75},
+            "log_enable": True,
+        }
+
+        # Scene / sim parameters
+        self.scene.env_spacing = 3.0
+        self.episode_length_s = 8.0
+        self.sim.dt = 0.003
+        self.sim.substeps = 1
+        self.sim.physx.max_velocity_iteration_count = 0
+        self.scene.terrain.physics_material.restitution = 0.0
+        if self.scene.contact_forces is not None:
+            self.scene.contact_forces.update_period = self.sim.dt
+
+        # Explicit init state to match r1
+        self.scene.robot = self.scene.robot.replace(
+            init_state=self.scene.robot.init_state.replace(
+                pos=(0.0, 0.0, 0.32),
+                rot=(
+                    0.9999929146412841,
+                    -0.00023085526184233324,
+                    -0.0032073138974974646,
+                    -0.0019571690372445424,
+                ),
+                joint_pos={
+                    "FL_HipX_joint": -0.0154048,
+                    "FR_HipX_joint": 0.0159887,
+                    "HL_HipX_joint": -0.0221317,
+                    "HR_HipX_joint": 0.0224431,
+                    "FL_HipY_joint": -0.76697,
+                    "FR_HipY_joint": -0.768286,
+                    "HL_HipY_joint": -0.765865,
+                    "HR_HipY_joint": -0.767203,
+                    "FL_Knee_joint": 1.53761,
+                    "FR_Knee_joint": 1.53636,
+                    "HL_Knee_joint": 1.54788,
+                    "HR_Knee_joint": 1.54679,
+                },
+            ),
+        )
+
+        # Deployment reset configuration (match r1)
+        self.events.reset_to_deploy.params["deploy_prob"] = 1.0
+        self.events.reset_to_deploy.params["deploy_height"] = 0.30
+        self.events.reset_to_deploy.params["deploy_quat_w"] = (
+            0.9999929146412841,
+            -0.00023085526184233324,
+            -0.0032073138974974646,
+            -0.0019571690372445424,
+        )
+        self.events.reset_to_deploy.params["deploy_joint_angles"] = {
+            "FL_HipX_joint": 0.0,
+            "FR_HipX_joint": 0.0,
+            "HL_HipX_joint": 0.0,
+            "HR_HipX_joint": 0.0,
+            "FL_HipY_joint": -0.7729795255029084,
+            "FR_HipY_joint": -0.7729795255029084,
+            "HL_HipY_joint": -0.7729795255029084,
+            "HR_HipY_joint": -0.7729795255029084,
+            "FL_Knee_joint": 1.5005003509817765,
+            "FR_Knee_joint": 1.5005003509817765,
+            "HL_Knee_joint": 1.5005003509817765,
+            "HR_Knee_joint": 1.5005003509817765,
+        }
+        self.events.reset_to_deploy.params["add_noise"] = False
+        self.events.reset_to_near_goal.params["near_goal_prob"] = 0.0
+
+        # Disable domain randomization for deploy/r1
+        self.events.randomize_rigid_body_material = None
+        self.events.randomize_rigid_body_mass = None
+        self.events.randomize_com_positions = None
+        self.events.randomize_actuator_gains = None
+        self.events.randomize_motor_strength = None
+        self.events.randomize_push_robot = None
+        self.observations.policy.enable_corruption = False
+
+        # Minimal reset noise
+        self.events.randomize_reset_base.params["pose_range"] = {
+            "x": (0.0, 0.0), "y": (0.0, 0.0), "yaw": (0.0, 0.0)
+        }
+        self.events.randomize_reset_base.params["velocity_range"] = {
+            "x": (0.0, 0.0), "y": (0.0, 0.0), "z": (0.0, 0.0),
+            "roll": (0.0, 0.0), "pitch": (0.0, 0.0), "yaw": (0.0, 0.0),
+        }
+        self.events.randomize_reset_joints.params["position_range"] = (1.0, 1.0)
+
+        # Reward parameter tuning to match r1 config
+        pitch_target = -1.2217304763960306
+        pitch_tolerance = 0.3839724354387525
+        for term in (
+            self.rewards.torso_upright_soften,
+            self.rewards.torso_upright_warmup,
+            self.rewards.torso_upright_continuous,
+            self.rewards.front_legs_up_warmup,
+            self.rewards.front_legs_up_continuous,
+            self.rewards.front_legs_up_warmup_safe,
+            self.rewards.front_legs_up_continuous_safe,
+        ):
+            term.params["pitch_target"] = pitch_target
+            term.params["pitch_tolerance"] = pitch_tolerance
+
+        self.rewards.base_height_bonus.params["min_height"] = 0.6
+        self.rewards.base_height_bonus.params["max_height"] = 0.9
+        self.rewards.feet_contact_forces.params["max_contact_force"] = 80.0
+        self.rewards.deploy_posture_gate.params["margin_deg"] = 0.5
+        self.rewards.deploy_posture_gate.params["roll_limit_rad"] = math.radians(40.0)
+        self.rewards.deploy_posture_gate.params["pitch_limit_rad"] = math.radians(90.0)
+
+        # Base reward scales from deploy/r1 config (curriculum overrides per phase)
+        self.rewards.torso_upright.weight = 4.5
+        self.rewards.torso_upright_soften.weight = 1.8
+        self.rewards.torso_upright_warmup.weight = 1.8
+        self.rewards.torso_upright_continuous.weight = 7.0
+        self.rewards.front_legs_up.weight = 2.5
+        self.rewards.front_legs_up_warmup.weight = 3.0
+        self.rewards.front_legs_up_continuous.weight = 5.5
+        self.rewards.front_legs_up_warmup_safe.weight = 1.0e-6
+        self.rewards.front_legs_up_continuous_safe.weight = 1.0e-6
+        self.rewards.front_tap_penalty.weight = -3.0
+        self.rewards.human_posture.weight = 5.0
+        self.rewards.human_posture_warmup.weight = 1.8
+        self.rewards.hind_leg_extension_geom.weight = 1.0
+        self.rewards.hind_knee_extension.weight = 0.5
+        self.rewards.hind_legs_calmness.weight = 0.2
+        self.rewards.stand_still.weight = 0.15
+        self.rewards.stand_still_roll_only.weight = 0.05
+        self.rewards.stand_still_yaw_only.weight = 0.05
+        self.rewards.stand_still_lin_x.weight = 0.05
+        self.rewards.stand_still_lin_y.weight = 0.05
+        self.rewards.stand_still_lin_z.weight = 0.05
+        self.rewards.base_height_bonus.weight = 1.5
+        self.rewards.lin_vel_z.weight = -1.0e-6
+        self.rewards.ang_vel_xy.weight = -1.0e-6
+        self.rewards.action_rate.weight = -1.0e-2
+        self.rewards.action_magnitude.weight = -1.0e-6
+        self.rewards.target_smoothness.weight = -1.0e-6
+        self.rewards.dof_vel.weight = -1.0e-6
+        self.rewards.dof_acc.weight = -2.5e-7
+        self.rewards.power.weight = -1.0e-3
+        self.rewards.torques.weight = -1.0e-5
+        self.rewards.torque_limits.weight = -1.0e-3
+        self.rewards.dof_vel_limits.weight = -1.0e-3
+        self.rewards.feet_velocity.weight = -5.0e-2
+        self.rewards.feet_contact_forces.weight = -1.0e-3
+        self.rewards.collision.weight = -1.0
+        self.rewards.two_leg_stability_safe.weight = 1.0e-6
+        self.rewards.deploy_posture_gate.weight = -5.0
+        self.rewards.is_terminated.weight = -10.0

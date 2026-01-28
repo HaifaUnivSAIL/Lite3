@@ -147,18 +147,6 @@ docker run "${DOCKER_ARGS[@]}" \
             ${ISAACSIM_PATH}/python.sh -m pip install -e /workspace/rl_training_new/legged_gym; \
           fi; \
         fi; \
-        if ! ${ISAACSIM_PATH}/python.sh -c \"import transformations\" >/dev/null 2>&1; then \
-          ${ISAACSIM_PATH}/python.sh -m pip install transformations; \
-        fi; \
-        if ! ${ISAACSIM_PATH}/python.sh -c \"import gym\" >/dev/null 2>&1; then \
-          ${ISAACSIM_PATH}/python.sh -m pip install gym==0.26.2; \
-        fi; \
-        if ! ${ISAACSIM_PATH}/python.sh -c \"import tensordict\" >/dev/null 2>&1; then \
-          ${ISAACSIM_PATH}/python.sh -m pip install tensordict; \
-        fi; \
-        if ! grep -q \"isaac-sim/python.sh\" /root/.bashrc 2>/dev/null; then \
-          printf '\n# Isaac Sim python wrapper\npython(){ /isaac-sim/python.sh \"\$@\"; }\npython3(){ /isaac-sim/python.sh \"\$@\"; }\npip(){ /isaac-sim/python.sh -m pip \"\$@\"; }\n' >> /root/.bashrc; \
-        fi; \
         echo \"[launch.sh] PYTHONPATH=\${PYTHONPATH}\"; \
         echo \"[launch.sh] ISAACSIM_PATH=\${ISAACSIM_PATH}\"; \
         echo \"[launch.sh] OMNI_EXTENSIONS_PATH=\${OMNI_EXTENSIONS_PATH}\"; \

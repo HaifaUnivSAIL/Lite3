@@ -123,8 +123,6 @@ def randomize_motor_strength(
         if stiffness.dim() == 1:
             stiffness = stiffness.unsqueeze(0).repeat(env.scene.num_envs, 1)
         base_stiffness = stiffness
-        if default_stiffness is not None and default_stiffness.dim() == 1:
-            default_stiffness = default_stiffness.unsqueeze(0).repeat(env.scene.num_envs, 1)
         stiffness[env_ids[:, None], joint_ids] = (
             base_stiffness[env_ids[:, None], joint_ids] * factors.to(base_stiffness.dtype)
         )
@@ -133,8 +131,6 @@ def randomize_motor_strength(
         if damping.dim() == 1:
             damping = damping.unsqueeze(0).repeat(env.scene.num_envs, 1)
         base_damping = damping
-        if default_damping is not None and default_damping.dim() == 1:
-            default_damping = default_damping.unsqueeze(0).repeat(env.scene.num_envs, 1)
         damping[env_ids[:, None], joint_ids] = (
             base_damping[env_ids[:, None], joint_ids] * factors.to(base_damping.dtype)
         )
@@ -379,12 +375,16 @@ def reset_to_deploy_state(
                     asset.data.joint_pos[deploy_ids, jid] = angle
                 asset.data.joint_vel[deploy_ids, jid] = 0.0
 
-    # Write to simulation
-    asset.write_root_pose_to_sim(asset.data.root_state_w[:, :7], env_ids=deploy_ids)
-    asset.write_root_velocity_to_sim(asset.data.root_state_w[:, 7:], env_ids=deploy_ids)
+    # Write to simulation (subset only to avoid shape mismatch)
+    asset.write_root_pose_to_sim(asset.data.root_state_w[deploy_ids, :7], env_ids=deploy_ids)
+    asset.write_root_velocity_to_sim(asset.data.root_state_w[deploy_ids, 7:], env_ids=deploy_ids)
+    # Clone to avoid overlapping memory writes when selecting env_ids
+    joint_pos = asset.data.joint_pos.clone()
+    joint_vel = asset.data.joint_vel.clone()
+    # Write only the subset for these envs
     asset.write_joint_state_to_sim(
-        asset.data.joint_pos,
-        asset.data.joint_vel,
+        joint_pos[deploy_ids],
+        joint_vel[deploy_ids],
         env_ids=deploy_ids
     )
 

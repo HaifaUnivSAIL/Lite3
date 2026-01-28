@@ -202,6 +202,7 @@ class RslRlCompatWrapper:
         self._clear_history()
         obs_dict = self._attach_history(obs_dict)
         obs_dict = self._ensure_tensor_obs_dict(obs_dict)
+        self._sync_goal_state_prob()
         self._last_obs_dict = obs_dict
         return obs_dict
 
@@ -219,6 +220,7 @@ class RslRlCompatWrapper:
         obs_dict = self._attach_history(obs_dict)
         obs_dict = self._ensure_tensor_obs_dict(obs_dict)
         reward = self._clip_reward(reward, dones)
+        self._sync_goal_state_prob()
         self._last_obs_dict = obs_dict
         return obs_dict, reward, dones, info
 
@@ -232,12 +234,22 @@ class RslRlCompatWrapper:
         obs_dict = self._ensure_obs_dict(obs)
         obs_dict = self._attach_history(obs_dict)
         obs_dict = self._ensure_tensor_obs_dict(obs_dict)
+        self._sync_goal_state_prob()
         self._last_obs_dict = obs_dict
         return obs_dict
 
     def get_privileged_observations(self):
         obs_dict = self._last_obs_dict or self.get_observations()
         return obs_dict.get("privileged_obs")
+
+    def _sync_goal_state_prob(self):
+        # Expose goal_state_prob on the immediate wrapper for legacy logger access.
+        prob = _find_attr(self.env, "goal_state_prob")
+        if prob is not None:
+            try:
+                setattr(self.env, "goal_state_prob", prob)
+            except Exception:
+                pass
 
     def _get_initial_obs(self):
         if hasattr(self.env, "get_observations"):

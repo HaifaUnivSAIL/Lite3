@@ -206,6 +206,12 @@ def contact_states(
     return (torch.linalg.norm(net_forces, dim=-1) > 1.0).to(net_forces.dtype)
 
 
+def _to_device(tensor: torch.Tensor, device: torch.device) -> torch.Tensor:
+    if tensor.device == device:
+        return tensor
+    return tensor.to(device=device)
+
+
 def friction_coeffs(
     env: "ManagerBasedRLEnv", repeat: int = 4
 ) -> torch.Tensor:
@@ -231,6 +237,7 @@ def friction_coeffs(
         friction = friction[:, None]
     if friction.shape[1] != 1:
         friction = friction[:, :1]
+    friction = _to_device(friction, env.device)
     return friction.repeat(1, repeat)
 
 
@@ -263,6 +270,7 @@ def mass_payload(
         masses = masses[:, asset_cfg.body_ids]
     else:
         masses = masses[:, asset_cfg.body_ids, 0]
+    masses = _to_device(masses, env.device)
     base_mass = masses[:, :1]
     default_mass = 6.0
     if hasattr(asset, "data") and hasattr(asset.data, "default_body_mass"):
@@ -282,7 +290,7 @@ def com_displacement(
         coms = asset.data.body_com[:, asset_cfg.body_ids, :]
     else:
         return torch.zeros((env.scene.num_envs, 3), device=env.device)
-    coms = coms.squeeze(1)
+    coms = _to_device(coms, env.device).squeeze(1)
     default_com = getattr(asset.data, "default_body_com", None) if hasattr(asset, "data") else None
     if default_com is not None:
         coms = coms - default_com[:, asset_cfg.body_ids, :].squeeze(1)
@@ -312,8 +320,8 @@ def motor_strength_factors(
                 break
     if effort is None or default_effort is None:
         return torch.zeros((env.scene.num_envs, len(asset_cfg.joint_ids)), device=env.device)
-    effort = effort[:, asset_cfg.joint_ids]
-    default_effort = default_effort[:, asset_cfg.joint_ids]
+    effort = _to_device(effort, env.device)[:, asset_cfg.joint_ids]
+    default_effort = _to_device(default_effort, env.device)[:, asset_cfg.joint_ids]
     ratio = effort / default_effort.clamp(min=1.0e-6)
     return ratio - 1.0
 
@@ -329,8 +337,8 @@ def kp_factors(
     default_stiffness = getattr(asset.data, "default_joint_stiffness", None)
     if stiffness is None or default_stiffness is None:
         return torch.zeros((env.scene.num_envs, len(asset_cfg.joint_ids)), device=env.device)
-    stiffness = stiffness[:, asset_cfg.joint_ids]
-    default_stiffness = default_stiffness[:, asset_cfg.joint_ids]
+    stiffness = _to_device(stiffness, env.device)[:, asset_cfg.joint_ids]
+    default_stiffness = _to_device(default_stiffness, env.device)[:, asset_cfg.joint_ids]
     ratio = stiffness / default_stiffness.clamp(min=1.0e-6)
     if getattr(env, "_motor_strength_applied_to_gains", False):
         factors = getattr(env, "_motor_strength_factors", None)
@@ -354,8 +362,8 @@ def kd_factors(
     default_damping = getattr(asset.data, "default_joint_damping", None)
     if damping is None or default_damping is None:
         return torch.zeros((env.scene.num_envs, len(asset_cfg.joint_ids)), device=env.device)
-    damping = damping[:, asset_cfg.joint_ids]
-    default_damping = default_damping[:, asset_cfg.joint_ids]
+    damping = _to_device(damping, env.device)[:, asset_cfg.joint_ids]
+    default_damping = _to_device(default_damping, env.device)[:, asset_cfg.joint_ids]
     ratio = damping / default_damping.clamp(min=1.0e-6)
     if getattr(env, "_motor_strength_applied_to_gains", False):
         factors = getattr(env, "_motor_strength_factors", None)
