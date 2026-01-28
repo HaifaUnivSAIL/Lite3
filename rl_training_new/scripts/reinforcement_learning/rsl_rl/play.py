@@ -22,7 +22,6 @@ from isaaclab.app import AppLauncher
 # local imports
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 import cli_args
-from rl_utils import camera_follow
 
 # add argparse arguments
 parser = argparse.ArgumentParser(description="Train an RL agent with RSL-RL.")
@@ -55,6 +54,9 @@ sys.argv = [sys.argv[0]] + hydra_args
 # launch omniverse app
 app_launcher = AppLauncher(args_cli)
 simulation_app = app_launcher.app
+
+# Import Omniverse/IsaacSim-dependent utilities after SimulationApp is ready.
+from rl_utils import camera_follow
 
 """Rest everything follows."""
 
@@ -107,8 +109,10 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
     # disable randomization for play
     env_cfg.observations.policy.enable_corruption = False
     # remove random pushing
-    env_cfg.events.randomize_apply_external_force_torque = None
-    env_cfg.events.push_robot = None
+    if hasattr(env_cfg.events, "randomize_apply_external_force_torque"):
+        env_cfg.events.randomize_apply_external_force_torque = None
+    if hasattr(env_cfg.events, "randomize_push_robot"):
+        env_cfg.events.randomize_push_robot = None
     env_cfg.curriculum.command_levels = None
 
     if args_cli.keyboard:

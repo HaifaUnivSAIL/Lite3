@@ -6,10 +6,9 @@
 
 import torch
 
-import isaaclab.utils.math as math_utils
-
-
 def camera_follow(env):
+    # Import after SimulationApp starts to satisfy Omniverse import order.
+    import isaaclab.utils.math as math_utils
     if not hasattr(camera_follow, "smooth_camera_positions"):
         camera_follow.smooth_camera_positions = []
     robot_pos = env.unwrapped.scene["robot"].data.root_pos_w[0]
@@ -41,4 +40,3 @@ def reindex_feet(vec):
 
 def reindex(vec):
     return vec[:, [3, 4, 5, 0, 1, 2, 9, 10, 11, 6, 7, 8]]
-
