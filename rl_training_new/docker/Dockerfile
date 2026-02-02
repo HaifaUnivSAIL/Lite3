@@ -51,9 +51,10 @@ COPY docker/requirements_server.txt /tmp/requirements_server.txt
 RUN if [ "$BUILD_ENV" = "server" ]; then \
       echo "[Docker] Server build: installing from requirements_server.txt"; \
       pip install -r /tmp/requirements_server.txt; \
+      pip install onnx onnxruntime; \
     else \
       echo "[Docker] Local build: installing minimal base"; \
-      pip install numpy==1.26.4 torch torchvision gymnasium opencv-python transformations gym==0.26.2 tensordict; \
+      pip install numpy==1.26.4 torch torchvision gymnasium opencv-python transformations gym==0.26.2 tensordict onnx onnxruntime; \
     fi
 
 # --- Isaac Sim python wrapper for interactive shells ---

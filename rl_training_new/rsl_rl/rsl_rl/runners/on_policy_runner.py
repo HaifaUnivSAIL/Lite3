@@ -351,7 +351,7 @@ class OnPolicyRunner:
                     reward_term_means[reward_name] = float(value)
                     if active_reward_names is not None and reward_name not in active_reward_names:
                         continue
-                    ep_string += f"""{f'Mean episode {key}:':>{pad}} {value:.3e} (x1e6: {value * 1.0e6:.3f})\n"""
+                    ep_string += f"""{f'Mean episode {key}:':>{pad}} {value:.3e}\n"""
         else:
             # Fallback: Isaac Lab reward manager episode sums (prints only active terms).
             active_reward_names = self._get_active_reward_names()
@@ -371,7 +371,7 @@ class OnPolicyRunner:
                     except Exception:
                         continue
                     reward_term_means[name] = value
-                    ep_string += f"""{f'Mean episode rew_{name}:':>{pad}} {value:.3e} (x1e6: {value * 1.0e6:.3f})\n"""
+                    ep_string += f"""{f'Mean episode rew_{name}:':>{pad}} {value:.3e}\n"""
 
             # write each reward item into a csv file
             if reward_row is not None:

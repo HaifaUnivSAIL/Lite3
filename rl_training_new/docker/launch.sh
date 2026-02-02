@@ -5,6 +5,7 @@ set -e
 # Container and image settings
 # -----------------------------
 PROJECT_ROOT=$(realpath "$(dirname "$0")/..")
+DEPLOY_ROOT="$(dirname "${PROJECT_ROOT}")/Lite3_rl_deploy"
 IMAGE_NAME=rl_training_new_env
 CONTAINER_NAME=rl_training_new_train_server
 
@@ -119,11 +120,13 @@ docker run "${DOCKER_ARGS[@]}" \
   --entrypoint /bin/bash \
   \
   -v "${PROJECT_ROOT}:/workspace/rl_training_new" \
+  $(if [[ -d "${DEPLOY_ROOT}" ]]; then echo "-v ${DEPLOY_ROOT}:/workspace/Lite3_rl_deploy"; fi) \
   -w /workspace/rl_training_new \
   \
   -e ACCEPT_EULA=Y \
   -e ISAACSIM_PATH="${ISAACSIM_PATH}" \
   -e ISAACLAB_ROOT="${ISAACLAB_ROOT}" \
+  $(if [[ -d "${DEPLOY_ROOT}" ]]; then echo "-e LITE3_DEPLOY_DIR=/workspace/Lite3_rl_deploy"; fi) \
   \
   --shm-size=2g \
   ${IMAGE_NAME} \
