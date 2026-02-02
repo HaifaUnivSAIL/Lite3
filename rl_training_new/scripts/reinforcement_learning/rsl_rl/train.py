@@ -62,6 +62,7 @@ import gymnasium as gym
 import os
 import torch
 from datetime import datetime
+import textwrap
 
 from rsl_rl.runners import OnPolicyRunner
 
@@ -81,6 +82,19 @@ from isaaclab_tasks.utils.hydra import hydra_task_config
 import rl_training.tasks  # noqa: F401
 from rl_training.utils.env_wrappers import RslRlCompatWrapper
 
+
+def _make_world_writable(path: str, is_dir: bool = True) -> None:
+    """Best-effort chmod to allow collaborative access to logs."""
+    mode = 0o777 if is_dir else 0o666
+    try:
+        if not is_dir:
+            current = os.stat(path).st_mode
+            if current & 0o111:
+                mode = 0o777
+        os.chmod(path, mode)
+    except OSError:
+        pass
+
 torch.backends.cuda.matmul.allow_tf32 = True
 torch.backends.cudnn.allow_tf32 = True
 torch.backends.cudnn.deterministic = False
@@ -90,6 +104,8 @@ torch.backends.cudnn.benchmark = False
 @hydra_task_config(args_cli.task, args_cli.agent)
 def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agent_cfg: RslRlOnPolicyRunnerCfg):
     """Train with RSL-RL agent."""
+    # Ensure logs are world-accessible by default.
+    os.umask(0o000)
     # override configurations with non-hydra CLI arguments
     agent_cfg = cli_args.update_rsl_rl_cfg(agent_cfg, args_cli)
     env_cfg.scene.num_envs = args_cli.num_envs if args_cli.num_envs is not None else env_cfg.scene.num_envs
@@ -123,6 +139,20 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
     if agent_cfg.run_name:
         log_dir += f"_{agent_cfg.run_name}"
     log_dir = os.path.join(log_root_path, log_dir)
+
+    # create log directory early so helper scripts can be generated
+    os.makedirs(log_dir, exist_ok=True)
+    os.makedirs(os.path.join(log_dir, "params"), exist_ok=True)
+    _make_world_writable(os.path.join("logs", "rsl_rl"))
+    _make_world_writable(os.path.join("logs", "rsl_rl", agent_cfg.experiment_name))
+    _make_world_writable(log_dir)
+    _make_world_writable(os.path.join(log_dir, "params"))
+    _write_run_scripts(
+        log_dir=log_dir,
+        task=args_cli.task,
+        experiment_name=agent_cfg.experiment_name,
+        agent_entry_point=args_cli.agent,
+    )
 
     # create isaac environment
     env = gym.make(args_cli.task, cfg=env_cfg, render_mode="rgb_array" if args_cli.video else None)
@@ -179,11 +209,325 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
     # dump the configuration into log-directory
     dump_yaml(os.path.join(log_dir, "params", "env.yaml"), env_cfg)
     dump_yaml(os.path.join(log_dir, "params", "agent.yaml"), agent_cfg)
+    _make_world_writable(os.path.join(log_dir, "params", "env.yaml"), is_dir=False)
+    _make_world_writable(os.path.join(log_dir, "params", "agent.yaml"), is_dir=False)
     # run training
     runner.learn(num_learning_iterations=agent_cfg.max_iterations, init_at_random_ep_len=True)
 
     # close the simulator
     env.close()
+
+
+def _write_run_scripts(log_dir: str, task: str, experiment_name: str, agent_entry_point: str) -> None:
+    """Create run_play.sh, run_resume.sh, run_evolution.sh in the run directory."""
+    run_dir_abs = os.path.abspath(log_dir)
+    exp_name = experiment_name
+    run_name = os.path.basename(run_dir_abs)
+
+    run_play_path = os.path.join(run_dir_abs, "run_play.sh")
+    run_resume_path = os.path.join(run_dir_abs, "run_resume.sh")
+    run_evolution_path = os.path.join(run_dir_abs, "run_evolution.sh")
+
+    play_cmd = f"""#!/usr/bin/env bash
+set -euo pipefail
+# Resolve repo/log roots relative to this run directory
+THIS_DIR="$(cd -- "$(dirname "$0")" >/dev/null 2>&1 && pwd)"
+LOGS_ROOT="$(cd "$THIS_DIR/../.." && pwd)"
+REPO_ROOT="$(cd "$LOGS_ROOT/../.." && pwd)"
+
+PYTHON_BIN="${{PYTHON_BIN:-python}}"
+if [[ -x "/isaac-sim/python.sh" ]]; then
+  PYTHON_BIN="/isaac-sim/python.sh"
+fi
+
+HEADLESS_FLAG=""
+CHECKPOINT=""
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --headless) HEADLESS_FLAG="--headless"; shift ;;
+    --checkpoint) CHECKPOINT="$2"; shift 2 ;;
+    *) echo "Unknown arg: $1"; exit 1 ;;
+  esac
+done
+CKPT_FLAG=""
+if [[ -n "$CHECKPOINT" ]]; then
+  CKPT_FLAG="--checkpoint $CHECKPOINT"
+fi
+
+"$PYTHON_BIN" "$REPO_ROOT/scripts/reinforcement_learning/rsl_rl/play.py" \\
+  --task "{task}" \\
+  --agent "{agent_entry_point}" \\
+  --load_run "{run_name}" \\
+  $CKPT_FLAG \\
+  $HEADLESS_FLAG
+"""
+
+    resume_cmd = f"""#!/usr/bin/env bash
+set -euo pipefail
+# Resolve repo/log roots relative to this run directory
+THIS_DIR="$(cd -- "$(dirname "$0")" >/dev/null 2>&1 && pwd)"
+LOGS_ROOT="$(cd "$THIS_DIR/../.." && pwd)"
+REPO_ROOT="$(cd "$LOGS_ROOT/../.." && pwd)"
+
+PYTHON_BIN="${{PYTHON_BIN:-python}}"
+if [[ -x "/isaac-sim/python.sh" ]]; then
+  PYTHON_BIN="/isaac-sim/python.sh"
+fi
+
+CHECKPOINT=""
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --checkpoint) CHECKPOINT="$2"; shift 2 ;;
+    *) echo "Unknown arg: $1"; exit 1 ;;
+  esac
+done
+CKPT_FLAG=""
+if [[ -n "$CHECKPOINT" ]]; then
+  CKPT_FLAG="--checkpoint $CHECKPOINT"
+fi
+
+# Always headless for resume scripts
+"$PYTHON_BIN" "$REPO_ROOT/scripts/reinforcement_learning/rsl_rl/train.py" \\
+  --task "{task}" \\
+  --agent "{agent_entry_point}" \\
+  --resume \\
+  --load_run "{run_name}" \\
+  $CKPT_FLAG \\
+  --headless
+"""
+
+    evolution_cmd = f"""#!/usr/bin/env bash
+set -euo pipefail
+
+# Resolve repo/log roots relative to this run directory
+THIS_DIR="$(cd -- "$(dirname "$0")" >/dev/null 2>&1 && pwd)"
+LOGS_ROOT="$(cd "$THIS_DIR/../.." && pwd)"
+REPO_ROOT="$(cd "$LOGS_ROOT/../.." && pwd)"
+
+PYTHON_BIN="${{PYTHON_BIN:-python}}"
+if [[ -x "/isaac-sim/python.sh" ]]; then
+  PYTHON_BIN="/isaac-sim/python.sh"
+fi
+
+EXP_NAME="$(basename "$(dirname "$THIS_DIR")")"
+RUN_NAME="$(basename "$THIS_DIR")"
+
+# Default checkpoints to showcase policy evolution
+DEFAULT_CKPTS=("model_1000.pt" "model_2000.pt" "model_3000.pt" "model_4000.pt" "model_5000.pt" "model_6000.pt" "model_7000.pt" "model_8000.pt" "model_9000.pt" "model_10000.pt" "model_11000.pt" "model_12000.pt" "model_13000.pt" "model_14000.pt" "model_15000.pt" "model_16000.pt" "model_17000.pt" "model_18000.pt" "model_19000.pt" "model_20000.pt")
+CHECKPOINTS=("${{DEFAULT_CKPTS[@]}}")
+FPS=30
+SECONDS_PER_CKPT=5
+FRAMES_PER_CKPT=""
+NUM_ENVS=20
+OUTPUT_NAME="policy_evolution.mp4"
+KEEP_FRAMES="${{KEEP_FRAMES:-1}}"
+SIM_DEVICE="${{SIM_DEVICE:-cuda:0}}"
+RL_DEVICE="${{RL_DEVICE:-cuda:0}}"
+HEADLESS=0
+
+usage() {{
+  cat <<'USAGE'
+Usage: ./run_evolution.sh [options]
+  --checkpoints <ckpt1 ckpt2 ...>   Space-separated checkpoint names
+  --fps <int>                       Frames per second for the output video (default: 30)
+  --seconds <float>                 Seconds to record per checkpoint (default: 5)
+  --frames <int>                    Override total frames per checkpoint (overrides --seconds)
+  --num-envs <int>                  Number of envs to roll out (default: 20)
+  --output <filename.mp4>           Final combined video name (default: policy_evolution.mp4)
+  --headless                        Run Isaac Sim headless
+  --keep-frames                     Keep intermediate MP4s (default: kept)
+  --sim-device <device>             Simulation device (default: cuda:0)
+  --rl-device <device>              RL device (default: cuda:0)
+USAGE
+}}
+
+# Parse CLI flags
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --checkpoints)
+      CHECKPOINTS=()
+      shift
+      while [[ $# -gt 0 && "$1" != --* ]]; do
+        CHECKPOINTS+=("$1")
+        shift
+      done
+      ;;
+    --fps) FPS="$2"; shift 2 ;;
+    --seconds) SECONDS_PER_CKPT="$2"; shift 2 ;;
+    --frames) FRAMES_PER_CKPT="$2"; shift 2 ;;
+    --num-envs) NUM_ENVS="$2"; shift 2 ;;
+    --output) OUTPUT_NAME="$2"; shift 2 ;;
+    --headless) HEADLESS=1; shift ;;
+    --keep-frames) KEEP_FRAMES=1; shift ;;
+    --sim-device) SIM_DEVICE="$2"; shift 2 ;;
+    --rl-device) RL_DEVICE="$2"; shift 2 ;;
+    -h|--help) usage; exit 0 ;;
+    *) echo "Unknown arg: $1"; usage; exit 1 ;;
+  esac
+done
+
+TASK="{task}"
+
+export EVOLVE_RUN_DIR="$THIS_DIR"
+export EVOLVE_REPO_ROOT="$REPO_ROOT"
+export EVOLVE_TASK="$TASK"
+export EVOLVE_EXP_NAME="$EXP_NAME"
+export EVOLVE_RUN_NAME="$RUN_NAME"
+export EVOLVE_AGENT="{agent_entry_point}"
+export EVOLVE_CHECKPOINTS="${{CHECKPOINTS[*]}}"
+export EVOLVE_FPS="$FPS"
+export EVOLVE_SECONDS="$SECONDS_PER_CKPT"
+export EVOLVE_FRAMES="$FRAMES_PER_CKPT"
+export EVOLVE_NUM_ENVS="$NUM_ENVS"
+export EVOLVE_OUTPUT_NAME="$OUTPUT_NAME"
+export EVOLVE_KEEP_FRAMES="$KEEP_FRAMES"
+export EVOLVE_SIM_DEVICE="$SIM_DEVICE"
+export EVOLVE_RL_DEVICE="$RL_DEVICE"
+export EVOLVE_HEADLESS="$HEADLESS"
+
+"$PYTHON_BIN" - <<'PY'
+import os
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+
+ffmpeg_bin = os.environ.get("FFMPEG_BIN", "ffmpeg")
+if shutil.which(ffmpeg_bin) is None:
+    sys.stderr.write(
+        f"[error] ffmpeg not found (looked for '{{ffmpeg_bin}}'). "
+        "Install it (e.g., `apt-get update && apt-get install -y ffmpeg`) "
+        "or set FFMPEG_BIN=/path/to/ffmpeg.\\n"
+    )
+    sys.exit(1)
+ffmpeg_crf = os.environ.get("FFMPEG_CRF", "18")
+ffmpeg_preset = os.environ.get("FFMPEG_PRESET", "medium")
+
+run_dir = Path(os.environ["EVOLVE_RUN_DIR"]).resolve()
+repo_root = Path(os.environ["EVOLVE_REPO_ROOT"]).resolve()
+task = os.environ.get("EVOLVE_TASK", "lite3")
+run_name = os.environ["EVOLVE_RUN_NAME"]
+agent_entry = os.environ.get("EVOLVE_AGENT", "rsl_rl_cfg_entry_point")
+ckpt_list = os.environ.get("EVOLVE_CHECKPOINTS", "").split()
+if not ckpt_list:
+    print("No checkpoints provided. Nothing to record.", file=sys.stderr)
+    sys.exit(1)
+
+fps = int(os.environ.get("EVOLVE_FPS", "30"))
+frames_env = os.environ.get("EVOLVE_FRAMES", "").strip()
+if frames_env:
+    frames_per_ckpt = int(float(frames_env))
+else:
+    seconds = float(os.environ.get("EVOLVE_SECONDS", "5"))
+    frames_per_ckpt = max(1, int(fps * seconds))
+num_envs = int(os.environ.get("EVOLVE_NUM_ENVS", "1"))
+output_name = os.environ.get("EVOLVE_OUTPUT_NAME", "policy_evolution.mp4")
+keep_frames = os.environ.get("EVOLVE_KEEP_FRAMES", "1") == "1"
+headless = os.environ.get("EVOLVE_HEADLESS", "0") == "1"
+
+videos_root = run_dir / "evolution_videos"
+videos_root.mkdir(exist_ok=True)
+
+def _run_play(checkpoint: str) -> Path | None:
+    ckpt_path = run_dir / checkpoint
+    if not ckpt_path.exists():
+        print(f"[skip] checkpoint {{checkpoint}} not found in {{run_dir}}", file=sys.stderr)
+        return None
+    cmd = [
+        sys.executable,
+        str(repo_root / "scripts" / "reinforcement_learning" / "rsl_rl" / "play.py"),
+        "--task",
+        task,
+        "--agent",
+        agent_entry,
+        "--load_run",
+        run_name,
+        "--checkpoint",
+        str(ckpt_path),
+        "--video",
+        "--video_length",
+        str(frames_per_ckpt),
+        "--num_envs",
+        str(num_envs),
+    ]
+    if headless:
+        cmd.append("--headless")
+    print("[record]", " ".join(cmd))
+    subprocess.run(cmd, check=True)
+
+    play_dir = run_dir / "videos" / "play"
+    if not play_dir.exists():
+        print(f"[error] play video folder not found: {{play_dir}}", file=sys.stderr)
+        return None
+    mp4s = sorted(play_dir.glob("*.mp4"), key=lambda p: p.stat().st_mtime)
+    if not mp4s:
+        print(f"[error] no mp4 produced in {{play_dir}}", file=sys.stderr)
+        return None
+    latest = mp4s[-1]
+    target = videos_root / f"{{checkpoint.replace('.pt','')}}.mp4"
+    latest.rename(target)
+    return target
+
+clips = []
+for ckpt in ckpt_list:
+    path = _run_play(ckpt)
+    if path:
+        clips.append(path)
+
+if not clips:
+    print("No clips were produced. Ensure checkpoints exist and Isaac Sim can render.", file=sys.stderr)
+    sys.exit(1)
+
+concat_list = videos_root / "concat_list.txt"
+with open(concat_list, "w") as f:
+    for clip in clips:
+        f.write(f"file '{{clip.as_posix()}}'\\n")
+
+final_path = run_dir / output_name
+ffmpeg_cmd = [
+    ffmpeg_bin,
+    "-y",
+    "-f",
+    "concat",
+    "-safe",
+    "0",
+    "-i",
+    str(concat_list),
+    "-c:v",
+    "libx264",
+    "-crf",
+    str(ffmpeg_crf),
+    "-preset",
+    str(ffmpeg_preset),
+    "-pix_fmt",
+    "yuv420p",
+    "-movflags",
+    "+faststart",
+    str(final_path),
+]
+subprocess.run(ffmpeg_cmd, check=True)
+print(f"[done] Video saved to: {{final_path}}")
+
+if not keep_frames:
+    for clip in clips:
+        clip.unlink(missing_ok=True)
+    concat_list.unlink(missing_ok=True)
+PY
+"""
+
+    script_pairs = [
+        (run_play_path, play_cmd),
+        (run_resume_path, resume_cmd),
+        (run_evolution_path, evolution_cmd),
+    ]
+    for path, content in script_pairs:
+        with open(path, "w") as f:
+            f.write(textwrap.dedent(content))
+        try:
+            os.chmod(path, 0o755)
+        except OSError:
+            pass
+        _make_world_writable(path, is_dir=False)
 
 
 if __name__ == "__main__":

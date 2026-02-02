@@ -18,7 +18,7 @@ RUN apt-get update && apt-get install -y \
     libopencv-dev python3-opencv \
     libboost-all-dev libeigen3-dev \
     libxext6 libxrender1 libxi6 libxrandr2 libxinerama1 libsm6 \
-    vulkan-tools \
+    vulkan-tools ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
 # --- Create venv baked into the image ---

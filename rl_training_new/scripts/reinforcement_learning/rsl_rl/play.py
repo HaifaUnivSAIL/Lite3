@@ -129,9 +129,9 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
             func=lambda env: torch.tensor(controller.advance(), dtype=torch.float32).unsqueeze(0).to(env.device),
         )
 
-    # specify directory for logging experiments
-    log_root_path = os.path.join("logs", "rsl_rl", agent_cfg.experiment_name)
-    log_root_path = os.path.abspath(log_root_path)
+    # specify directory for logging experiments (anchor to repo root, not CWD)
+    repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
+    log_root_path = os.path.join(repo_root, "logs", "rsl_rl", agent_cfg.experiment_name)
     print(f"[INFO] Loading experiment from directory: {log_root_path}")
     if args_cli.checkpoint:
         resume_path = retrieve_file_path(args_cli.checkpoint)
@@ -215,6 +215,10 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
     # reset environment
     
     obs = env.get_observations()
+    obs_history = None
+    if isinstance(obs, dict):
+        obs_history = obs.get("obs_history", None)
+        obs = obs.get("obs", obs)
     
     timestep = 0
     # simulate environment
@@ -223,10 +227,16 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
         # run everything in inference mode
         with torch.inference_mode():
             # agent stepping
-            actions = policy(obs)
+            if obs_history is None:
+                actions = policy(obs)
+            else:
+                actions = policy(obs, obs_history)
 
             # env stepping
             obs, _, _, _ = env.step(actions)
+            if isinstance(obs, dict):
+                obs_history = obs.get("obs_history", obs_history)
+                obs = obs.get("obs", obs)
         if args_cli.video:
             timestep += 1
             # Exit the play loop after recording one video
