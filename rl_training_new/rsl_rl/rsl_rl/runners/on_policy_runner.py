@@ -171,6 +171,8 @@ class OnPolicyRunner:
             if candidate is not None and hasattr(candidate, "curriculum_controller"):
                 curriculum = candidate.curriculum_controller
                 break
+        eval_cb = getattr(self, "eval_callback", None)
+        eval_every = int(getattr(self, "eval_every", 0) or 0)
 
         tot_iter = self.current_learning_iteration + num_learning_iterations
         for it in range(self.current_learning_iteration, tot_iter):
@@ -212,6 +214,11 @@ class OnPolicyRunner:
             learn_time = stop - start
             if self.log_dir is not None:
                 self.log(locals())
+            if eval_cb is not None and eval_every > 0 and ((it + 1) % eval_every == 0):
+                try:
+                    eval_cb(it)
+                except Exception as exc:
+                    print(f"[WARN] Eval callback failed: {exc}")
             if self.save_interval != -1 and it % self.save_interval == 0:
                 self.save(os.path.join(self.log_dir, 'model_{}.pt'.format(it)), iteration=it)
                 # Save TorchScript version for ONNX export

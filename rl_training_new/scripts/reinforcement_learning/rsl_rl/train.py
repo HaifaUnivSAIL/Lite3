@@ -17,6 +17,9 @@ import argparse
 import os
 # os.environ["CUDA_VISIBLE_DEVICES"] = "1"
 import sys
+import copy
+import json
+import statistics
 
 from isaaclab.app import AppLauncher
 
@@ -94,6 +97,55 @@ def _make_world_writable(path: str, is_dir: bool = True) -> None:
         os.chmod(path, mode)
     except OSError:
         pass
+
+
+def _parse_int_env(name: str, default: int = 0) -> int:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    try:
+        return int(value)
+    except ValueError:
+        return default
+
+
+def _parse_bool_env(name: str, default: bool = False) -> bool:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "y", "on"}
+
+
+def _configure_eval_env_cfg(eval_cfg, force_deploy_reset: bool) -> None:
+    """Apply play-style deterministic settings to an eval env config."""
+    eval_cfg.observations.policy.enable_corruption = False
+    eval_cfg.curriculum.command_levels = None
+
+    if hasattr(eval_cfg.events, "randomize_apply_external_force_torque"):
+        eval_cfg.events.randomize_apply_external_force_torque = None
+    if hasattr(eval_cfg.events, "randomize_push_robot"):
+        eval_cfg.events.randomize_push_robot = None
+
+    if force_deploy_reset:
+        if hasattr(eval_cfg.events, "reset_to_deploy"):
+            eval_cfg.events.reset_to_deploy.params["deploy_prob"] = 1.0
+            eval_cfg.events.reset_to_deploy.params["add_noise"] = False
+        if hasattr(eval_cfg.events, "reset_to_near_goal"):
+            eval_cfg.events.reset_to_near_goal.params["near_goal_prob"] = 0.0
+        if hasattr(eval_cfg.events, "randomize_reset_base"):
+            eval_cfg.events.randomize_reset_base.params["pose_range"] = {
+                "x": (0.0, 0.0), "y": (0.0, 0.0), "yaw": (0.0, 0.0)
+            }
+            eval_cfg.events.randomize_reset_base.params["velocity_range"] = {
+                "x": (0.0, 0.0), "y": (0.0, 0.0), "z": (0.0, 0.0),
+                "roll": (0.0, 0.0), "pitch": (0.0, 0.0), "yaw": (0.0, 0.0),
+            }
+        if hasattr(eval_cfg.events, "randomize_reset_joints"):
+            eval_cfg.events.randomize_reset_joints.params["position_range"] = (1.0, 1.0)
+        if hasattr(eval_cfg.events, "randomize_actuator_gains"):
+            eval_cfg.events.randomize_actuator_gains = None
+        if hasattr(eval_cfg.events, "randomize_motor_strength"):
+            eval_cfg.events.randomize_motor_strength = None
 
 torch.backends.cuda.matmul.allow_tf32 = True
 torch.backends.cudnn.allow_tf32 = True
@@ -206,6 +258,177 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
         # load previously trained model
         runner.load(resume_path)
 
+    # Optional train-time evaluation pass (deploy-aligned).
+    eval_env = None
+    eval_inplace_env = None
+    eval_every = _parse_int_env("LITE3_TRAIN_EVAL_EVERY", default=200)
+    if eval_every > 0:
+        eval_steps = _parse_int_env("LITE3_TRAIN_EVAL_STEPS", default=200)
+        eval_num_envs = _parse_int_env("LITE3_TRAIN_EVAL_NUM_ENVS", default=1)
+        force_deploy = _parse_bool_env("LITE3_TRAIN_EVAL_FORCE_DEPLOY_RESET", default=True)
+        eval_mode = os.getenv("LITE3_TRAIN_EVAL_MODE", "inplace").strip().lower()
+        if eval_mode == "separate" and not _parse_bool_env("LITE3_TRAIN_EVAL_ALLOW_SEPARATE", default=False):
+            print("[INFO] LITE3_TRAIN_EVAL_MODE=separate ignored (set "
+                  "LITE3_TRAIN_EVAL_ALLOW_SEPARATE=1 to enable). Falling back to inplace eval.")
+            eval_mode = "inplace"
+
+        if eval_mode == "separate":
+            try:
+                eval_cfg = copy.deepcopy(env_cfg)
+                eval_cfg.scene.num_envs = eval_num_envs
+                _configure_eval_env_cfg(eval_cfg, force_deploy_reset=force_deploy)
+
+                eval_env = gym.make(args_cli.task, cfg=eval_cfg, render_mode=None)
+                if isinstance(eval_env.unwrapped, DirectMARLEnv):
+                    eval_env = multi_agent_to_single_agent(eval_env)
+                eval_env = RslRlVecEnvWrapper(eval_env, clip_actions=agent_cfg.clip_actions)
+                eval_env = RslRlCompatWrapper(
+                    eval_env,
+                    obs_history_length=obs_history_len,
+                    only_positive_rewards=only_positive_rewards,
+                    termination_reward_weight=term_weight,
+                )
+            except RuntimeError as exc:
+                if "Simulation context already exists" in str(exc):
+                    print("[WARN] Eval env creation failed (simulation context already exists). "
+                          "Falling back to in-place eval on training env.")
+                    eval_env = None
+                    eval_inplace_env = env
+                    eval_mode = "inplace"
+                else:
+                    raise
+        else:
+            eval_inplace_env = env
+            eval_mode = "inplace"
+
+        eval_log_path = os.path.join(log_dir, "eval_history.jsonl")
+        eval_metric_name = os.getenv("LITE3_TRAIN_EVAL_METRIC", "two_leg_stand_metric")
+        eval_metric_threshold = float(os.getenv("LITE3_TRAIN_EVAL_SUCCESS_THRESHOLD", "0.75"))
+
+        metric_env = None
+        metric_fn = None
+        metric_params = None
+        metric_source = eval_env if eval_env is not None else eval_inplace_env
+        for candidate in (metric_source, getattr(metric_source, "env", None), getattr(metric_source, "unwrapped", None)):
+            if candidate is None:
+                continue
+            rm = getattr(candidate, "reward_manager", None)
+            if rm is None or not hasattr(rm, "get_term_cfg"):
+                continue
+            try:
+                term_cfg = rm.get_term_cfg(eval_metric_name)
+            except Exception:
+                term_cfg = None
+            if term_cfg is not None:
+                metric_env = candidate
+                metric_fn = term_cfg.func
+                metric_params = term_cfg.params
+                break
+
+        def _eval_callback(it: int) -> None:
+            if eval_env is None:
+                # In-place eval: use current training env state (no reset/steps).
+                mean_rew = float("nan")
+                mean_len = float("nan")
+                if metric_fn is not None and metric_env is not None:
+                    metric_val = metric_fn(metric_env, **metric_params)
+                    mean_metric = float(metric_val.detach().mean().item())
+                    success_rate = float((metric_val >= eval_metric_threshold).float().mean().item())
+                else:
+                    mean_metric = None
+                    success_rate = None
+                eval_mode = "inplace"
+            else:
+                eval_mode = "rollout"
+                policy = runner.get_inference_policy(device=runner.device)
+                obs_dict = eval_env.reset()
+                obs = obs_dict.get("obs")
+                obs_history = obs_dict.get("obs_history")
+                if obs is None:
+                    return
+                obs = obs.to(runner.device)
+                if obs_history is not None:
+                    obs_history = obs_history.to(runner.device)
+
+                rewbuffer = []
+                lenbuffer = []
+                cur_reward_sum = torch.zeros(eval_env.num_envs, dtype=torch.float, device=runner.device)
+                cur_episode_length = torch.zeros(eval_env.num_envs, dtype=torch.float, device=runner.device)
+                metric_sum = None
+                metric_hits = None
+                metric_count = 0
+
+                with torch.inference_mode():
+                    for _ in range(eval_steps):
+                        if obs_history is None:
+                            actions = policy(obs)
+                        else:
+                            actions = policy(obs, obs_history)
+                        obs_dict, rewards, dones, infos = eval_env.step(actions)
+                        obs = obs_dict.get("obs")
+                        obs_history = obs_dict.get("obs_history")
+                        if obs is None:
+                            break
+                        obs = obs.to(runner.device)
+                        if obs_history is not None:
+                            obs_history = obs_history.to(runner.device)
+                        rewards = rewards.to(runner.device)
+                        dones = dones.to(runner.device)
+
+                        cur_reward_sum += rewards
+                        cur_episode_length += 1
+                        if metric_fn is not None and metric_env is not None:
+                            metric_val = metric_fn(metric_env, **metric_params)
+                            if metric_sum is None:
+                                metric_sum = metric_val.detach().clone()
+                                metric_hits = (metric_val >= eval_metric_threshold).float()
+                            else:
+                                metric_sum += metric_val.detach()
+                                metric_hits += (metric_val >= eval_metric_threshold).float()
+                            metric_count += 1
+                        new_ids = (dones > 0).nonzero(as_tuple=False)
+                        if new_ids.numel() > 0:
+                            rewbuffer.extend(cur_reward_sum[new_ids][:, 0].detach().cpu().numpy().tolist())
+                            lenbuffer.extend(cur_episode_length[new_ids][:, 0].detach().cpu().numpy().tolist())
+                            cur_reward_sum[new_ids] = 0
+                            cur_episode_length[new_ids] = 0
+
+                mean_rew = statistics.mean(rewbuffer) if rewbuffer else float(cur_reward_sum.mean().item())
+                mean_len = statistics.mean(lenbuffer) if lenbuffer else float(cur_episode_length.mean().item())
+                if metric_fn is not None and metric_sum is not None and metric_count > 0:
+                    mean_metric = float((metric_sum / metric_count).mean().item())
+                    success_rate = float((metric_hits / metric_count).mean().item())
+                else:
+                    mean_metric = None
+                    success_rate = None
+
+            payload = {
+                "iteration": int(it),
+                "eval_steps": int(eval_steps),
+                "num_envs": int(eval_num_envs),
+                "force_deploy_reset": bool(force_deploy),
+                "eval_mode": eval_mode,
+                "mean_reward": float(mean_rew),
+                "mean_episode_length": float(mean_len),
+                "success_metric_name": eval_metric_name if metric_fn is not None else None,
+                "success_metric_threshold": eval_metric_threshold if metric_fn is not None else None,
+                "mean_success_metric": mean_metric,
+                "success_rate": success_rate,
+            }
+            print(
+                f"[EVAL] iter {it}: mean_reward={payload['mean_reward']:.4f}, "
+                f"mean_len={payload['mean_episode_length']:.2f}, "
+                f"success_rate={payload['success_rate'] if payload['success_rate'] is not None else 'N/A'}"
+            )
+            try:
+                with open(eval_log_path, "a", encoding="utf-8") as handle:
+                    handle.write(json.dumps(payload) + "\n")
+            except Exception:
+                pass
+
+        runner.eval_every = eval_every
+        runner.eval_callback = _eval_callback
+
     # dump the configuration into log-directory
     dump_yaml(os.path.join(log_dir, "params", "env.yaml"), env_cfg)
     dump_yaml(os.path.join(log_dir, "params", "agent.yaml"), agent_cfg)
@@ -215,6 +438,8 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
     runner.learn(num_learning_iterations=agent_cfg.max_iterations, init_at_random_ep_len=True)
 
     # close the simulator
+    if eval_env is not None:
+        eval_env.close()
     env.close()
 
 
@@ -253,6 +478,16 @@ CKPT_FLAG=""
 if [[ -n "$CHECKPOINT" ]]; then
   CKPT_FLAG="--checkpoint $CHECKPOINT"
 fi
+
+# Optional debug dumps for parity checks (enabled by default for quick inspection).
+# Always enable debug dumps for parity workflow (no env needed).
+export LITE3_DEBUG_PLAY_DUMPS="5"
+export LITE3_DEBUG_PLAY_EVERY="1"
+# Default to a stable, shared debug root for parity workflows.
+export LITE3_DEBUG_PLAY_DIR="${{LITE3_DEBUG_PLAY_DIR:-/workspace/rl_training_new/lite3_debug/train/$(basename \"$THIS_DIR\")}}"
+# Parity helper: force deploy-style reset + single env unless overridden.
+export LITE3_PLAY_FORCE_DEPLOY_RESET="${{LITE3_PLAY_FORCE_DEPLOY_RESET:-1}}"
+export LITE3_PLAY_NUM_ENVS="${{LITE3_PLAY_NUM_ENVS:-1}}"
 
 "$PYTHON_BIN" "$REPO_ROOT/scripts/reinforcement_learning/rsl_rl/play.py" \\
   --task "{task}" \\
