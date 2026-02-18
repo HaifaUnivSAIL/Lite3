@@ -134,6 +134,12 @@ DEFAULT_JOINT_POS_POLICY = np.asarray(
     ],
     dtype=np.float32,
 )
+DEFAULT_PD_KP = np.full((12,), 20.0, dtype=np.float32)
+DEFAULT_PD_KD = np.full((12,), 0.7, dtype=np.float32)
+DEFAULT_EFFORT_LIMITS = np.asarray(
+    [24.0, 24.0, 36.0, 24.0, 24.0, 36.0, 24.0, 24.0, 36.0, 24.0, 24.0, 36.0],
+    dtype=np.float32,
+)
 
 
 def _parse_int_env(name: str, default: int = 0) -> int:
@@ -212,6 +218,35 @@ def _extract_action_scale(env_cfg) -> float:
         return float(scale)
     except Exception:
         return 1.0
+
+
+def _resolve_effective_gain(raw_gain: np.ndarray | None, fallback: np.ndarray, act_dim: int) -> np.ndarray:
+    """Use fallback gains when simulator-exported gain tensors are missing/placeholder zeros."""
+    gain = fallback[:act_dim].astype(np.float32, copy=True)
+    if raw_gain is None or raw_gain.size < act_dim:
+        return gain
+    cand = raw_gain[:act_dim].astype(np.float32, copy=False)
+    if not np.all(np.isfinite(cand)):
+        return gain
+    if float(np.max(np.abs(cand))) <= 1.0e-6:
+        return gain
+    return cand.astype(np.float32, copy=True)
+
+
+def _resolve_effective_effort_limits(raw_limits: np.ndarray | None, act_dim: int) -> np.ndarray:
+    """Use training actuator limits when sim reports unbounded placeholder limits."""
+    limits = DEFAULT_EFFORT_LIMITS[:act_dim].astype(np.float32, copy=True)
+    if raw_limits is None or raw_limits.size < act_dim:
+        return limits
+    cand = raw_limits[:act_dim].astype(np.float32, copy=False)
+    if not np.all(np.isfinite(cand)):
+        return limits
+    max_abs = float(np.max(np.abs(cand)))
+    if max_abs <= 1.0e-6 or max_abs >= 1.0e6:
+        return limits
+    if float(np.min(cand)) <= 0.0:
+        return limits
+    return cand.astype(np.float32, copy=True)
 
 
 def _ensure_world_writable(path: str) -> None:
@@ -543,32 +578,33 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
             )
             base_rot_mat = _quat_wxyz_to_rotmat(base_quat_wxyz)
 
-            joint_pos_robot = _as_float_vec(
+            # Isaac tensors are in policy joint order; deploy control diagnostics are logged in robot order.
+            joint_pos_policy_state = _as_float_vec(
                 _first_env_numpy(getattr(robot_data, "joint_pos", None)) if robot_data is not None else None
             )
-            joint_vel_robot = _as_float_vec(
+            joint_vel_policy_state = _as_float_vec(
                 _first_env_numpy(getattr(robot_data, "joint_vel", None)) if robot_data is not None else None
             )
-            joint_stiffness = _as_float_vec(
+            joint_stiffness_policy = _as_float_vec(
                 _first_env_numpy(getattr(robot_data, "joint_stiffness", None)) if robot_data is not None else None
             )
-            joint_damping = _as_float_vec(
+            joint_damping_policy = _as_float_vec(
                 _first_env_numpy(getattr(robot_data, "joint_damping", None)) if robot_data is not None else None
             )
-            default_joint_pos_robot = _as_float_vec(
+            default_joint_pos_policy_state = _as_float_vec(
                 _first_env_numpy(getattr(robot_data, "default_joint_pos", None)) if robot_data is not None else None
             )
 
             soft_limits = _first_env_numpy(getattr(robot_data, "soft_joint_pos_limits", None)) if robot_data is not None else None
-            joint_limits_lower = None
-            joint_limits_upper = None
+            joint_limits_lower_policy = None
+            joint_limits_upper_policy = None
             if soft_limits is not None:
                 soft_limits = np.asarray(soft_limits, dtype=np.float32)
                 if soft_limits.ndim == 2 and soft_limits.shape[1] >= 2:
-                    joint_limits_lower = soft_limits[:, 0].reshape(-1)
-                    joint_limits_upper = soft_limits[:, 1].reshape(-1)
+                    joint_limits_lower_policy = soft_limits[:, 0].reshape(-1)
+                    joint_limits_upper_policy = soft_limits[:, 1].reshape(-1)
 
-            effort_limits = None
+            effort_limits_policy = None
             if robot_data is not None:
                 for attr_name in (
                     "joint_effort_limits",
@@ -579,43 +615,56 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
                 ):
                     raw = getattr(robot_data, attr_name, None)
                     if raw is not None:
-                        effort_limits = _as_float_vec(_first_env_numpy(raw))
-                        if effort_limits is not None:
+                        effort_limits_policy = _as_float_vec(_first_env_numpy(raw))
+                        if effort_limits_policy is not None:
                             break
 
             act_dim = 12
+            joint_pos_robot = None
+            joint_vel_robot = None
+            joint_limits_lower = None
+            joint_limits_upper = None
+            kp = None
+            kd = None
+            effort_lim_eff = None
             if actions0 is not None and actions0.size >= act_dim:
                 action_raw = actions0[:act_dim].astype(np.float32, copy=False)
                 action_offset = action_raw * np.float32(policy_action_scale)
                 target_joint_pos_policy = DEFAULT_JOINT_POS_POLICY + action_offset
                 target_joint_pos_robot = target_joint_pos_policy[POLICY_IDX_FOR_ROBOT]
 
+                if joint_pos_policy_state is not None and joint_pos_policy_state.size >= act_dim:
+                    joint_pos_robot = joint_pos_policy_state[:act_dim][POLICY_IDX_FOR_ROBOT]
+                if joint_vel_policy_state is not None and joint_vel_policy_state.size >= act_dim:
+                    joint_vel_robot = joint_vel_policy_state[:act_dim][POLICY_IDX_FOR_ROBOT]
+                if joint_limits_lower_policy is not None and joint_limits_lower_policy.size >= act_dim:
+                    joint_limits_lower = joint_limits_lower_policy[:act_dim][POLICY_IDX_FOR_ROBOT]
+                if joint_limits_upper_policy is not None and joint_limits_upper_policy.size >= act_dim:
+                    joint_limits_upper = joint_limits_upper_policy[:act_dim][POLICY_IDX_FOR_ROBOT]
+
                 target_joint_pos_clipped = target_joint_pos_robot.copy()
                 if joint_limits_lower is not None and joint_limits_upper is not None:
-                    if joint_limits_lower.size >= act_dim and joint_limits_upper.size >= act_dim:
-                        target_joint_pos_clipped = np.clip(
-                            target_joint_pos_clipped,
-                            joint_limits_lower[:act_dim],
-                            joint_limits_upper[:act_dim],
-                        )
+                    target_joint_pos_clipped = np.clip(
+                        target_joint_pos_clipped,
+                        joint_limits_lower[:act_dim],
+                        joint_limits_upper[:act_dim],
+                    )
 
                 pd_tau_raw_est = None
                 pd_tau_clipped_est = None
+                kp_policy = _resolve_effective_gain(joint_stiffness_policy, DEFAULT_PD_KP, act_dim)
+                kd_policy = _resolve_effective_gain(joint_damping_policy, DEFAULT_PD_KD, act_dim)
+                effort_lim_eff_policy = _resolve_effective_effort_limits(effort_limits_policy, act_dim)
+                kp = kp_policy[POLICY_IDX_FOR_ROBOT]
+                kd = kd_policy[POLICY_IDX_FOR_ROBOT]
+                effort_lim_eff = effort_lim_eff_policy[POLICY_IDX_FOR_ROBOT]
                 if joint_pos_robot is not None and joint_vel_robot is not None:
                     if joint_pos_robot.size >= act_dim and joint_vel_robot.size >= act_dim:
-                        kp = np.full((act_dim,), 20.0, dtype=np.float32)
-                        kd = np.full((act_dim,), 0.7, dtype=np.float32)
-                        if joint_stiffness is not None and joint_stiffness.size >= act_dim:
-                            kp = joint_stiffness[:act_dim].astype(np.float32, copy=False)
-                        if joint_damping is not None and joint_damping.size >= act_dim:
-                            kd = joint_damping[:act_dim].astype(np.float32, copy=False)
                         pd_tau_raw_est = kp * (target_joint_pos_robot - joint_pos_robot[:act_dim]) + kd * (
                             -joint_vel_robot[:act_dim]
                         )
                         pd_tau_clipped_est = pd_tau_raw_est.copy()
-                        if effort_limits is not None and effort_limits.size >= act_dim:
-                            lim = effort_limits[:act_dim]
-                            pd_tau_clipped_est = np.clip(pd_tau_clipped_est, -lim, lim)
+                        pd_tau_clipped_est = np.clip(pd_tau_clipped_est, -effort_lim_eff, effort_lim_eff)
 
                 extended_payload.update(
                     {
@@ -625,13 +674,17 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
                         "target_joint_pos_clipped": target_joint_pos_clipped.astype(np.float32, copy=False),
                     }
                 )
+                extended_payload["joint_stiffness"] = kp.astype(np.float32, copy=False)
+                extended_payload["joint_damping"] = kd.astype(np.float32, copy=False)
+                extended_payload["effort_limits"] = effort_lim_eff.astype(np.float32, copy=False)
                 if pd_tau_raw_est is not None:
                     extended_payload["pd_tau_raw_est"] = pd_tau_raw_est.astype(np.float32, copy=False)
                 if pd_tau_clipped_est is not None:
                     extended_payload["pd_tau_clipped_est"] = pd_tau_clipped_est.astype(np.float32, copy=False)
-                if default_joint_pos_robot is not None and default_joint_pos_robot.size >= act_dim:
-                    default_joint_pos_policy = default_joint_pos_robot[:act_dim][POLICY_FROM_ROBOT_IDX]
-                    extended_payload["default_joint_pos_policy"] = default_joint_pos_policy.astype(np.float32, copy=False)
+                if default_joint_pos_policy_state is not None and default_joint_pos_policy_state.size >= act_dim:
+                    extended_payload["default_joint_pos_policy"] = default_joint_pos_policy_state[:act_dim].astype(
+                        np.float32, copy=False
+                    )
 
             if base_quat_wxyz is not None and base_quat_wxyz.size >= 4:
                 extended_payload["base_quat_wxyz"] = base_quat_wxyz[:4].astype(np.float32, copy=False)
@@ -649,12 +702,15 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
                 extended_payload["joint_limits_lower"] = joint_limits_lower[:act_dim].astype(np.float32, copy=False)
             if joint_limits_upper is not None and joint_limits_upper.size >= act_dim:
                 extended_payload["joint_limits_upper"] = joint_limits_upper[:act_dim].astype(np.float32, copy=False)
-            if effort_limits is not None and effort_limits.size >= act_dim:
-                extended_payload["effort_limits"] = effort_limits[:act_dim].astype(np.float32, copy=False)
-            if joint_stiffness is not None and joint_stiffness.size >= act_dim:
-                extended_payload["joint_stiffness"] = joint_stiffness[:act_dim].astype(np.float32, copy=False)
-            if joint_damping is not None and joint_damping.size >= act_dim:
-                extended_payload["joint_damping"] = joint_damping[:act_dim].astype(np.float32, copy=False)
+            if "effort_limits" not in extended_payload:
+                effort_lim_fallback = _resolve_effective_effort_limits(effort_limits_policy, act_dim)
+                extended_payload["effort_limits"] = effort_lim_fallback[POLICY_IDX_FOR_ROBOT]
+            if "joint_stiffness" not in extended_payload:
+                kp_fallback = _resolve_effective_gain(joint_stiffness_policy, DEFAULT_PD_KP, act_dim)
+                extended_payload["joint_stiffness"] = kp_fallback[POLICY_IDX_FOR_ROBOT]
+            if "joint_damping" not in extended_payload:
+                kd_fallback = _resolve_effective_gain(joint_damping_policy, DEFAULT_PD_KD, act_dim)
+                extended_payload["joint_damping"] = kd_fallback[POLICY_IDX_FOR_ROBOT]
 
         out_path = os.path.join(debug_dir, f"debug_play_step{step_idx}.npz")
         payload = {
