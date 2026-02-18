@@ -319,6 +319,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
         metric_env = None
         metric_fn = None
         metric_params = None
+        metric_components_fn = None
         metric_source = eval_env if eval_env is not None else eval_inplace_env
         for candidate in (metric_source, getattr(metric_source, "env", None), getattr(metric_source, "unwrapped", None)):
             if candidate is None:
@@ -335,16 +336,38 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
                 metric_fn = term_cfg.func
                 metric_params = term_cfg.params
                 break
+        if metric_fn is not None and getattr(metric_fn, "__name__", "") == "two_leg_stand_metric":
+            try:
+                metric_components_fn = getattr(
+                    __import__(metric_fn.__module__, fromlist=["two_leg_stand_metric_components"]),
+                    "two_leg_stand_metric_components",
+                    None,
+                )
+            except Exception:
+                metric_components_fn = None
+
+        def _metric_component_means(components: dict[str, torch.Tensor] | None) -> dict[str, float] | None:
+            if not isinstance(components, dict) or not components:
+                return None
+            out: dict[str, float] = {}
+            for name, value in components.items():
+                if torch.is_tensor(value):
+                    out[name] = float(value.detach().mean().item())
+            return out or None
 
         def _eval_callback(it: int) -> None:
+            component_means = None
             if eval_env is None:
-                # In-place eval: use current training env state (no reset/steps).
-                mean_rew = float("nan")
-                mean_len = float("nan")
+                # In-place eval: no separate rollout (would perturb training env state).
+                # Report rolling train-window reward/length to avoid NaN placeholders.
+                mean_rew = float(getattr(runner, "last_train_mean_reward", float("nan")))
+                mean_len = float(getattr(runner, "last_train_mean_episode_length", float("nan")))
                 if metric_fn is not None and metric_env is not None:
                     metric_val = metric_fn(metric_env, **metric_params)
                     mean_metric = float(metric_val.detach().mean().item())
                     success_rate = float((metric_val >= eval_metric_threshold).float().mean().item())
+                    if metric_components_fn is not None:
+                        component_means = _metric_component_means(metric_components_fn(metric_env, **metric_params))
                 else:
                     mean_metric = None
                     success_rate = None
@@ -368,6 +391,8 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
                 metric_sum = None
                 metric_hits = None
                 metric_count = 0
+                metric_component_sums: dict[str, torch.Tensor] = {}
+                metric_component_count = 0
 
                 with torch.inference_mode():
                     for _ in range(eval_steps):
@@ -397,6 +422,17 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
                                 metric_sum += metric_val.detach()
                                 metric_hits += (metric_val >= eval_metric_threshold).float()
                             metric_count += 1
+                            if metric_components_fn is not None:
+                                component_vals = metric_components_fn(metric_env, **metric_params)
+                                if isinstance(component_vals, dict):
+                                    for name, value in component_vals.items():
+                                        if not torch.is_tensor(value):
+                                            continue
+                                        if name not in metric_component_sums:
+                                            metric_component_sums[name] = value.detach().clone()
+                                        else:
+                                            metric_component_sums[name] += value.detach()
+                                    metric_component_count += 1
                         new_ids = (dones > 0).nonzero(as_tuple=False)
                         if new_ids.numel() > 0:
                             rewbuffer.extend(cur_reward_sum[new_ids][:, 0].detach().cpu().numpy().tolist())
@@ -409,9 +445,21 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
                 if metric_fn is not None and metric_sum is not None and metric_count > 0:
                     mean_metric = float((metric_sum / metric_count).mean().item())
                     success_rate = float((metric_hits / metric_count).mean().item())
+                    if metric_component_count > 0 and metric_component_sums:
+                        component_means = {
+                            name: float((value / metric_component_count).mean().item())
+                            for name, value in metric_component_sums.items()
+                        }
                 else:
                     mean_metric = None
                     success_rate = None
+
+            worst_gates_top3 = None
+            if component_means:
+                gate_values = {k: v for k, v in component_means.items() if k != "metric"}
+                if gate_values:
+                    ordered = sorted(gate_values.items(), key=lambda kv: kv[1])
+                    worst_gates_top3 = [{"name": name, "mean": float(val)} for name, val in ordered[:3]]
 
             payload = {
                 "iteration": int(it),
@@ -426,12 +474,20 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
                 "success_metric_threshold": eval_metric_threshold if metric_fn is not None else None,
                 "mean_success_metric": mean_metric,
                 "success_rate": success_rate,
+                "success_metric_components": component_means,
+                "success_metric_worst_gates_top3": worst_gates_top3,
             }
             print(
                 f"[EVAL] iter {it}: mean_reward={payload['mean_reward']:.4f}, "
                 f"mean_len={payload['mean_episode_length']:.2f}, "
                 f"success_rate={payload['success_rate'] if payload['success_rate'] is not None else 'N/A'}"
             )
+            if worst_gates_top3:
+                worst_gates_text = ", ".join(f"{item['name']}:{item['mean']:.3e}" for item in worst_gates_top3)
+                print(
+                    f"[EVAL] iter {it}: success_metric={component_means.get('metric', float('nan')):.3e}, "
+                    f"worst_gates_top3={worst_gates_text}"
+                )
             try:
                 with open(eval_log_path, "a", encoding="utf-8") as handle:
                     handle.write(json.dumps(payload) + "\n")
@@ -501,6 +557,7 @@ export LITE3_DEBUG_PLAY_DIR="${{LITE3_DEBUG_PLAY_DIR:-/workspace/rl_training_new
 export LITE3_PLAY_FORCE_DEPLOY_RESET="${{LITE3_PLAY_FORCE_DEPLOY_RESET:-0}}"
 export LITE3_PLAY_NUM_ENVS="${{LITE3_PLAY_NUM_ENVS:-1}}"
 
+cd "$REPO_ROOT"
 "$PYTHON_BIN" "$REPO_ROOT/scripts/reinforcement_learning/rsl_rl/play.py" \\
   --task "{task}" \\
   --agent "{agent_entry_point}" \\
@@ -534,6 +591,7 @@ if [[ -n "$CHECKPOINT" ]]; then
 fi
 
 # Always headless for resume scripts
+cd "$REPO_ROOT"
 "$PYTHON_BIN" "$REPO_ROOT/scripts/reinforcement_learning/rsl_rl/train.py" \\
   --task "{task}" \\
   --agent "{agent_entry_point}" \\
@@ -556,6 +614,7 @@ if [[ -x "/isaac-sim/python.sh" ]]; then
   PYTHON_BIN="/isaac-sim/python.sh"
 fi
 
+cd "$REPO_ROOT"
 EXP_NAME="$(basename "$(dirname "$THIS_DIR")")"
 RUN_NAME="$(basename "$THIS_DIR")"
 

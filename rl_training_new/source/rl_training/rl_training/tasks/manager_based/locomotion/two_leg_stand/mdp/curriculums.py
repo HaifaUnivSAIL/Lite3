@@ -920,6 +920,14 @@ def two_leg_stand_curriculum(
 
     steps_per_env = max(int(steps_per_env), 1)
     iteration = int(env.common_step_counter // steps_per_env)
+    # Prefer the runner-provided iteration when available so resumed runs do not
+    # restart curriculum phases from zero after env recreation.
+    cc = getattr(env, "curriculum_controller", None)
+    if cc is not None and hasattr(cc, "progress_buf"):
+        try:
+            iteration = max(iteration, int(cc.progress_buf))
+        except Exception:
+            pass
     env._two_leg_curriculum.update(iteration)
 
     current_scales = env._two_leg_curriculum.current_reward_scales

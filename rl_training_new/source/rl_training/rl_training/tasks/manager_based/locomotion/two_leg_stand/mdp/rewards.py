@@ -1112,6 +1112,62 @@ def _safety_effort_gate(
     return (1.0 / (1.0 + penalty)).clamp(min=0.0, max=1.0)
 
 
+def _two_leg_stand_metric_components(
+    env: ManagerBasedRLEnv,
+    front_feet_sensor_cfg: SceneEntityCfg,
+    hind_feet_sensor_cfg: SceneEntityCfg,
+    front_feet_body_cfg: SceneEntityCfg = None,
+    pitch_tolerance: float = 0.35,
+    pitch_target: float = -1.22,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+) -> dict[str, torch.Tensor]:
+    """Compute per-gate components for two-leg standing metric debugging."""
+    asset: Articulation = env.scene[asset_cfg.name]
+
+    front_contact = _get_front_feet_contact(env, front_feet_sensor_cfg)
+    front_clear = (~front_contact).float()
+
+    hind_support = _get_hind_feet_contact(env, hind_feet_sensor_cfg).float()
+
+    pitch_width = (pitch_tolerance * 0.6) ** 2
+    orientation_gate = torch.clamp(
+        _orientation_gate(env, pitch_width, 0.15, pitch_target, asset_cfg), 0.0, 1.0
+    )
+
+    base_height = asset.data.root_pos_w[:, 2]
+    height_gate = torch.clamp((base_height - 0.45) / 0.25, min=0.0, max=1.0)
+
+    lin_speed = torch.norm(asset.data.root_lin_vel_b[:, :2], dim=1)
+    lin_gate = torch.clamp(torch.exp(-torch.square(lin_speed / 0.25)), 0.0, 1.0)
+
+    roll_yaw_speed = torch.norm(asset.data.root_ang_vel_b[:, [0, 2]], dim=1)
+    ang_gate = torch.clamp(torch.exp(-torch.square(roll_yaw_speed / 0.8)), 0.0, 1.0)
+
+    if front_feet_body_cfg is not None:
+        front_vel = asset.data.body_lin_vel_w[:, front_feet_body_cfg.body_ids, 2]
+        vertical_speed = torch.abs(front_vel).mean(dim=1)
+        tapping_gate = torch.clamp(torch.exp(-6.0 * vertical_speed), 0.0, 1.0)
+    else:
+        tapping_gate = torch.ones(env.num_envs, device=env.device)
+
+    metric = front_clear * hind_support
+    metric = metric * orientation_gate * height_gate
+    metric = metric * lin_gate * ang_gate
+    metric = metric * tapping_gate
+    metric = torch.clamp(metric, 0.0, 1.0)
+
+    return {
+        "front_clear": front_clear,
+        "hind_support": hind_support,
+        "orientation_gate": orientation_gate,
+        "height_gate": height_gate,
+        "lin_gate": lin_gate,
+        "ang_gate": ang_gate,
+        "tapping_gate": tapping_gate,
+        "metric": metric,
+    }
+
+
 def two_leg_stand_metric(
     env: ManagerBasedRLEnv,
     front_feet_sensor_cfg: SceneEntityCfg,
@@ -1125,48 +1181,37 @@ def two_leg_stand_metric(
 
     Combines: front clear, hind support, orientation, height, linear/angular velocity gates.
     """
-    asset: Articulation = env.scene[asset_cfg.name]
-
-    # Front clear
-    front_contact = _get_front_feet_contact(env, front_feet_sensor_cfg)
-    front_clear = (~front_contact).float()
-
-    # Hind support
-    hind_support = _get_hind_feet_contact(env, hind_feet_sensor_cfg).float()
-
-    # Orientation gate
-    pitch_width = (pitch_tolerance * 0.6) ** 2
-    orientation_gate = torch.clamp(
-        _orientation_gate(env, pitch_width, 0.15, pitch_target, asset_cfg), 0.0, 1.0
+    components = _two_leg_stand_metric_components(
+        env=env,
+        front_feet_sensor_cfg=front_feet_sensor_cfg,
+        hind_feet_sensor_cfg=hind_feet_sensor_cfg,
+        front_feet_body_cfg=front_feet_body_cfg,
+        pitch_tolerance=pitch_tolerance,
+        pitch_target=pitch_target,
+        asset_cfg=asset_cfg,
     )
+    return components["metric"]
 
-    # Height gate
-    base_height = asset.data.root_pos_w[:, 2]
-    height_gate = torch.clamp((base_height - 0.45) / 0.25, min=0.0, max=1.0)
 
-    # Linear velocity gate
-    lin_speed = torch.norm(asset.data.root_lin_vel_b[:, :2], dim=1)
-    lin_gate = torch.exp(-torch.square(lin_speed / 0.25))
-
-    # Angular velocity gate
-    roll_yaw_speed = torch.norm(asset.data.root_ang_vel_b[:, [0, 2]], dim=1)
-    ang_gate = torch.exp(-torch.square(roll_yaw_speed / 0.8))
-
-    # Front-foot tapping gate
-    if front_feet_body_cfg is not None:
-        front_vel = asset.data.body_lin_vel_w[:, front_feet_body_cfg.body_ids, 2]
-        vertical_speed = torch.abs(front_vel).mean(dim=1)
-        tapping_gate = torch.exp(-6.0 * vertical_speed)
-    else:
-        tapping_gate = torch.ones(env.num_envs, device=env.device)
-
-    # Combine
-    metric = front_clear * hind_support
-    metric = metric * orientation_gate * height_gate
-    metric = metric * torch.clamp(lin_gate, 0.0, 1.0) * torch.clamp(ang_gate, 0.0, 1.0)
-    metric = metric * torch.clamp(tapping_gate, 0.0, 1.0)
-
-    return torch.clamp(metric, 0.0, 1.0)
+def two_leg_stand_metric_components(
+    env: ManagerBasedRLEnv,
+    front_feet_sensor_cfg: SceneEntityCfg,
+    hind_feet_sensor_cfg: SceneEntityCfg,
+    front_feet_body_cfg: SceneEntityCfg = None,
+    pitch_tolerance: float = 0.35,
+    pitch_target: float = -1.22,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+) -> dict[str, torch.Tensor]:
+    """Public helper for eval logging of per-gate two-leg metric components."""
+    return _two_leg_stand_metric_components(
+        env=env,
+        front_feet_sensor_cfg=front_feet_sensor_cfg,
+        hind_feet_sensor_cfg=hind_feet_sensor_cfg,
+        front_feet_body_cfg=front_feet_body_cfg,
+        pitch_tolerance=pitch_tolerance,
+        pitch_target=pitch_target,
+        asset_cfg=asset_cfg,
+    )
 
 
 def two_leg_stability_safe(

@@ -52,6 +52,7 @@ from .rewards import (
     collision,
     # Stability metric
     two_leg_stand_metric,
+    two_leg_stand_metric_components,
     two_leg_stability_safe,
 )
 

@@ -127,6 +127,9 @@ class OnPolicyRunner:
         self.tot_timesteps = 0
         self.tot_time = 0
         self.current_learning_iteration = 0
+        # Latest rolling train-window stats (used by in-place eval callbacks).
+        self.last_train_mean_reward = float("nan")
+        self.last_train_mean_episode_length = float("nan")
         if self.cfg['resume']:
             # load previously trained model
             load_root = os.path.dirname(log_dir) if log_dir else None
@@ -176,6 +179,11 @@ class OnPolicyRunner:
 
         tot_iter = self.current_learning_iteration + num_learning_iterations
         for it in range(self.current_learning_iteration, tot_iter):
+            if curriculum is None:
+                for candidate in (self.env, getattr(self.env, "env", None), getattr(self.env, "unwrapped", None)):
+                    if candidate is not None and hasattr(candidate, "curriculum_controller"):
+                        curriculum = candidate.curriculum_controller
+                        break
             start = time.time()
             # Rollout
             with torch.inference_mode():
@@ -214,6 +222,12 @@ class OnPolicyRunner:
             learn_time = stop - start
             if self.log_dir is not None:
                 self.log(locals())
+            if len(rewbuffer) > 0:
+                self.last_train_mean_reward = float(statistics.mean(rewbuffer))
+                self.last_train_mean_episode_length = float(statistics.mean(lenbuffer))
+            else:
+                self.last_train_mean_reward = float("nan")
+                self.last_train_mean_episode_length = float("nan")
             if eval_cb is not None and eval_every > 0 and ((it + 1) % eval_every == 0):
                 try:
                     eval_cb(it)
