@@ -1,4 +1,4 @@
-rl_training
+# rl_training
 
 [![IsaacSim](https://img.shields.io/badge/IsaacSim-5.1.0-silver.svg)](https://docs.omniverse.nvidia.com/isaacsim/latest/overview.html)
 [![Isaac Lab](https://img.shields.io/badge/IsaacLab-2.3.0-silver)](https://isaac-sim.github.io/IsaacLab)
@@ -21,6 +21,25 @@ We've released the following tutorials for training and deploying a reinforcemen
 
 > [!NOTE]
 > If you want to deploy policies in mujoco or real robots, please use the corresponding deploy repo in [Deep Robotics Github Center](https://github.com/DeepRoboticsLab).
+
+## Documentation Map
+
+- `docs/README.md`: Documentation index for this project.
+- `docs/guides/run-play.md`: Train/play commands and run management.
+- `docs/guides/docker-setup.md`: Docker setup and runtime behavior.
+- `docs/workflows/experiment-workflow.md`: Full parity experiment workflow.
+- `docs/experiments/history-seed-parity.md`: History-seed parity experiment and conclusion.
+- `docs/operations/training-stack-deployment-checklist.md`: Release checklist for deploy-ready runs.
+- `scripts/tools/README.md`: Tool reference for compare/export/validate scripts.
+- `tests/README.md`: Test coverage and how to run repository tests.
+
+## History Reset Semantics (Current Default)
+
+The default behavior is to clear observation history on episode reset/done events. This is the production-safe behavior and the expected training/deploy alignment.
+
+- Default mode (recommended): leave `LITE3_UNREALISTIC_HISTORY_FEED` unset (or `0`).
+- Debug-only legacy mode: set `LITE3_UNREALISTIC_HISTORY_FEED=1` to preserve history across done resets.
+
 ## Contribution 
 
 Everyone is welcome to contribute to this repo. If you discover a bug or optimize our training config, just submit a pull request and we will look into it.
@@ -57,7 +76,7 @@ To enable your extension, follow these steps:
 1. **Add the search path of your repository** to the extension manager:
     - Navigate to the extension manager using `Window` -> `Extensions`.
     - Click on the **Hamburger Icon** (☰), then go to `Settings`.
-    - In the `Extension Search Paths`, enter the absolute path to `rl_trainingb/source`
+    - In the `Extension Search Paths`, enter the absolute path to `rl_training/source`
     - If not already present, in the `Extension Search Paths`, enter the path that leads to Isaac Lab's extension directory directory (`IsaacLab/source`)
     - Click on the **Hamburger Icon** (☰), then click `Refresh`.
 
@@ -118,7 +137,7 @@ You can download our trained examples for reference of the training process. Thi
     python -m torch.distributed.run --nnodes=1 --nproc_per_node=2 scripts/reinforcement_learning/rsl_rl/train.py --task=<ENV_NAME> --headless 
     python -m torch.distributed.run --nnodes=1 --nproc_per_node=2 scripts/reinforcement_learning/rsl_rl/train.py --task=Rough-Deeprobotics-Lite3-v0 --headless --distributed --num_envs=2048
     ```
-* Note: each gpu will have the same number of envs specified in the config, to use the previous total number of envs, devide it by the number of gpus.
+* Note: each GPU will have the same number of envs specified in the config. To keep the same total env count, divide by the number of GPUs.
 * To scale up training beyond multiple GPUs on a single machine, it is also possible to train across multiple nodes. To train across multiple nodes/machines, it is required to launch an individual process on each node.
 
     For the master node, use the following command, where --nproc_per_node represents the number of available GPUs, and --nnodes represents the number of nodes:

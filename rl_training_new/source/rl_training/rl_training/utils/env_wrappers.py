@@ -7,9 +7,22 @@ from typing import Any
 
 from collections.abc import Mapping
 
+import os
 import numpy as np
 import torch
 import gymnasium as gym
+
+
+def _parse_bool_env(name: str, default: bool = False) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() not in ("", "0", "false", "no", "off")
+
+
+def _is_unrealistic_history_feed_enabled() -> bool:
+    """Debug-only legacy mode: keep observation history across episode done/reset."""
+    return _parse_bool_env("LITE3_UNREALISTIC_HISTORY_FEED", default=False)
 
 
 class OnlyPositiveRewardsWrapper(gym.Wrapper):
@@ -48,6 +61,13 @@ class ObservationHistoryWrapper(gym.Wrapper):
         super().__init__(env)
         self.obs_history_length = int(obs_history_length)
         self.obs_key = obs_key
+        self.unrealistic_history_feed = _is_unrealistic_history_feed_enabled()
+        self.clear_history_on_done = not self.unrealistic_history_feed
+        if self.unrealistic_history_feed:
+            print(
+                "[ObsHistoryWrapper] LITE3_UNREALISTIC_HISTORY_FEED=1: "
+                "preserving history across done resets (debug-only legacy mode)."
+            )
         self.num_obs: int | None = None
         self.num_obs_history: int | None = None
         self.obs_history = None
@@ -70,7 +90,7 @@ class ObservationHistoryWrapper(gym.Wrapper):
         self._ensure_buffers(policy_obs)
         self._append_history(policy_obs)
         reset_mask = self._reset_mask(terminated, truncated)
-        if reset_mask is not None:
+        if reset_mask is not None and self.clear_history_on_done:
             self._clear_history(reset_mask)
         obs = self._attach_history(obs)
         return obs, reward, terminated, truncated, info
@@ -183,6 +203,13 @@ class RslRlCompatWrapper:
 
         self.obs_history = None
         self._last_obs_dict = None
+        self.unrealistic_history_feed = _is_unrealistic_history_feed_enabled()
+        self.clear_history_on_done = not self.unrealistic_history_feed
+        if self.unrealistic_history_feed:
+            print(
+                "[RslRlCompat] LITE3_UNREALISTIC_HISTORY_FEED=1: "
+                "preserving history across done resets (debug-only legacy mode)."
+            )
 
         # Prime buffers to infer dimensions.
         obs_dict = self._ensure_obs_dict(self._get_initial_obs())
@@ -218,6 +245,11 @@ class RslRlCompatWrapper:
 
         obs_dict = self._ensure_obs_dict(obs)
         obs_dict = self._attach_history(obs_dict)
+        done_mask = self._done_mask(dones)
+        if done_mask is not None and self.clear_history_on_done:
+            # Clear history for environments that reset this step.
+            self._clear_history(done_mask)
+            obs_dict["obs_history"] = self.obs_history
         obs_dict = self._ensure_tensor_obs_dict(obs_dict)
         reward = self._clip_reward(reward, dones)
         self._sync_goal_state_prob()
@@ -338,13 +370,37 @@ class RslRlCompatWrapper:
         else:
             self.obs_history = np.zeros((obs.shape[0], self.num_obs_history), dtype=obs.dtype)
 
-    def _clear_history(self):
+    def _clear_history(self, mask=None):
         if self.obs_history is None:
             return
+        if mask is None:
+            if torch.is_tensor(self.obs_history):
+                self.obs_history.zero_()
+            else:
+                self.obs_history[:] = 0
+            return
         if torch.is_tensor(self.obs_history):
-            self.obs_history.zero_()
-        else:
-            self.obs_history[:] = 0
+            if torch.is_tensor(mask):
+                mask_t = mask.to(device=self.obs_history.device, dtype=torch.bool)
+            else:
+                mask_t = torch.as_tensor(mask, device=self.obs_history.device, dtype=torch.bool)
+            self.obs_history[mask_t] = 0
+            return
+        mask_np = np.asarray(mask, dtype=bool)
+        self.obs_history[mask_np] = 0
+
+    def _done_mask(self, dones):
+        if dones is None:
+            return None
+        if torch.is_tensor(dones):
+            mask = dones.to(dtype=torch.bool)
+            if mask.ndim > 1:
+                mask = mask.reshape(mask.shape[0], -1).any(dim=1)
+            return mask
+        mask = np.asarray(dones, dtype=bool)
+        if mask.ndim > 1:
+            mask = mask.reshape(mask.shape[0], -1).any(axis=1)
+        return mask
 
     def _append_history(self, obs):
         if self.obs_history is None:

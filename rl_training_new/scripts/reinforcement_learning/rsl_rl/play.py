@@ -159,6 +159,12 @@ def _parse_bool_env(name: str, default: bool = False) -> bool:
     return value.strip().lower() in {"1", "true", "yes", "y", "on"}
 
 
+def _history_mode_label() -> str:
+    if _parse_bool_env("LITE3_UNREALISTIC_HISTORY_FEED", default=False):
+        return "unrealistic_history_feed"
+    return "default_reset_on_done"
+
+
 def _to_cpu_numpy(value):
     if isinstance(value, torch.Tensor):
         return value.detach().cpu().numpy()
@@ -447,6 +453,11 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
         only_positive_rewards=only_positive_rewards,
         termination_reward_weight=term_weight,
     )
+    history_mode = _history_mode_label()
+    if history_mode == "unrealistic_history_feed":
+        print("[WARN] History mode: unrealistic_history_feed (debug-only legacy behavior).")
+    else:
+        print("[INFO] History mode: default_reset_on_done")
 
     print(f"[INFO]: Loading model checkpoint from: {resume_path}")
     # load previously trained model
@@ -503,6 +514,9 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
     # Debug dump config for parity checks with deploy.
     debug_quota = _parse_int_env("LITE3_DEBUG_PLAY_DUMPS", default=5)
     debug_every = max(1, _parse_int_env("LITE3_DEBUG_PLAY_EVERY", default=1))
+    debug_start_step = max(0, _parse_int_env("LITE3_DEBUG_PLAY_START_STEP", default=0))
+    debug_after_first_done = _parse_bool_env("LITE3_DEBUG_PLAY_AFTER_FIRST_DONE", default=False)
+    debug_ready = not debug_after_first_done
     debug_dump_full = _parse_bool_env("LITE3_DEBUG_PLAY_FULL", default=True)
     debug_counter = 0
     debug_dir = None
@@ -512,11 +526,18 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
         default_root = "/workspace/rl_training_new/lite3_debug/train"
         debug_dir = os.getenv("LITE3_DEBUG_PLAY_DIR") or os.path.join(default_root, run_id)
         os.makedirs(debug_dir, exist_ok=True)
-        print(f"[DEBUG] Play dumps enabled: quota={debug_quota} every={debug_every} dir={debug_dir}")
+        print(
+            f"[DEBUG] Play dumps enabled: quota={debug_quota} every={debug_every} "
+            f"start_step={debug_start_step} after_first_done={int(debug_after_first_done)} dir={debug_dir}"
+        )
 
     def _maybe_dump_play_debug(step_idx, obs, obs_history, actions):
         nonlocal debug_counter
         if debug_quota <= 0 or debug_dir is None:
+            return
+        if not debug_ready:
+            return
+        if step_idx < debug_start_step:
             return
         if step_idx % debug_every != 0:
             return
@@ -716,6 +737,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
         payload = {
             "obs_contract_names": np.asarray([name for name, _ in OBS_CONTRACT]),
             "obs_contract_dims": np.asarray([dim for _, dim in OBS_CONTRACT], dtype=np.int32),
+            "history_mode": np.asarray([history_mode]),
             "obs": obs0,
             "obs_history": hist0,
             "obs_flat": obs_flat,
@@ -749,10 +771,15 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
             _maybe_dump_play_debug(timestep, obs, obs_history, actions)
 
             # env stepping
-            obs, _, _, _ = env.step(actions)
+            obs, _, dones, _ = env.step(actions)
             if isinstance(obs, dict):
                 obs_history = obs.get("obs_history", obs_history)
                 obs = obs.get("obs", obs)
+            if debug_after_first_done and not debug_ready:
+                done_np = _to_cpu_numpy(dones)
+                if done_np is not None and np.asarray(done_np).astype(bool).any():
+                    debug_ready = True
+                    print(f"[DEBUG] First done observed at step={timestep}; debug dumping now active.")
         timestep += 1
         if args_cli.video:
             # Exit the play loop after recording one video

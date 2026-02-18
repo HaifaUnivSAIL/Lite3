@@ -16,6 +16,16 @@ Notes:
 - `Lite3_rl_deploy/` is tracked as a git submodule. Use `git submodule update --init --recursive` after cloning.
 - Log and build folders are generated during runs (`Lite3_rl_training/legged_gym/logs/`, `rl_training_new/logs/`, `Lite3_rl_deploy/build/`).
 
+**Documentation**
+- Workspace docs index: `docs/README.md`.
+- Workspace-level quick start: `README.md` (this file).
+- Isaac Lab training stack docs index: `rl_training_new/docs/README.md`.
+- Run/play guide: `rl_training_new/docs/guides/run-play.md`.
+- Docker guide: `rl_training_new/docs/guides/docker-setup.md`.
+- Parity workflow: `rl_training_new/docs/workflows/experiment-workflow.md`.
+- Parity experiment notes: `rl_training_new/docs/experiments/history-seed-parity.md`.
+- Deploy release checklist: `rl_training_new/docs/operations/training-stack-deployment-checklist.md`.
+
 **Installation Guide**
 Choose one training stack, then install deploy tools if you plan to run policies outside training.
 

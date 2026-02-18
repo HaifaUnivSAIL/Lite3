@@ -116,6 +116,12 @@ def _parse_bool_env(name: str, default: bool = False) -> bool:
     return value.strip().lower() in {"1", "true", "yes", "y", "on"}
 
 
+def _history_mode_label() -> str:
+    if _parse_bool_env("LITE3_UNREALISTIC_HISTORY_FEED", default=False):
+        return "unrealistic_history_feed"
+    return "default_reset_on_done"
+
+
 def _configure_eval_env_cfg(eval_cfg, force_deploy_reset: bool) -> None:
     """Apply play-style deterministic settings to an eval env config."""
     eval_cfg.observations.policy.enable_corruption = False
@@ -247,6 +253,11 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
         only_positive_rewards=only_positive_rewards,
         termination_reward_weight=term_weight,
     )
+    history_mode = _history_mode_label()
+    if history_mode == "unrealistic_history_feed":
+        print("[WARN] History mode: unrealistic_history_feed (debug-only legacy behavior).")
+    else:
+        print("[INFO] History mode: default_reset_on_done")
 
     # create runner from rsl-rl
     runner = OnPolicyRunner(env, agent_cfg.to_dict(), log_dir=log_dir, device=agent_cfg.device)
@@ -407,6 +418,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
                 "eval_steps": int(eval_steps),
                 "num_envs": int(eval_num_envs),
                 "force_deploy_reset": bool(force_deploy),
+                "history_mode": history_mode,
                 "eval_mode": eval_mode,
                 "mean_reward": float(mean_rew),
                 "mean_episode_length": float(mean_len),
@@ -485,8 +497,8 @@ export LITE3_DEBUG_PLAY_DUMPS="5"
 export LITE3_DEBUG_PLAY_EVERY="1"
 # Default to a stable, shared debug root for parity workflows.
 export LITE3_DEBUG_PLAY_DIR="${{LITE3_DEBUG_PLAY_DIR:-/workspace/rl_training_new/lite3_debug/train/$(basename \"$THIS_DIR\")}}"
-# Parity helper: force deploy-style reset + single env unless overridden.
-export LITE3_PLAY_FORCE_DEPLOY_RESET="${{LITE3_PLAY_FORCE_DEPLOY_RESET:-1}}"
+# Parity helper (opt-in): force deploy-style reset only when explicitly requested.
+export LITE3_PLAY_FORCE_DEPLOY_RESET="${{LITE3_PLAY_FORCE_DEPLOY_RESET:-0}}"
 export LITE3_PLAY_NUM_ENVS="${{LITE3_PLAY_NUM_ENVS:-1}}"
 
 "$PYTHON_BIN" "$REPO_ROOT/scripts/reinforcement_learning/rsl_rl/play.py" \\
