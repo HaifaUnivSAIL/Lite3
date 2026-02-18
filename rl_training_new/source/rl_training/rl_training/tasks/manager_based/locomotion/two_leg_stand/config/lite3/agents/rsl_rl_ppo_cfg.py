@@ -97,3 +97,13 @@ class Lite3TwoLegStandDeployR1PPORunnerCfg(Lite3TwoLegStandDeployAlignedPPORunne
         # Explicitly mirror adaptation network config
         self.policy.adaptation_hidden_dims = [256, 32]
         self.policy.encoder_latent_dims = 18
+
+
+@configclass
+class Lite3TwoLegStandRobustPPORunnerCfg(Lite3TwoLegStandSafePPORunnerCfg):
+    """PPO runner for robust two-leg stand domain randomization."""
+
+    def __post_init__(self):
+        super().__post_init__()
+        self.experiment_name = "two_leg_stand_robust"
+        self.max_iterations = 20000

@@ -10,6 +10,7 @@ import math
 from isaaclab.managers import SceneEntityCfg
 from isaaclab.managers import TerminationTermCfg as DoneTerm
 from isaaclab.utils import configclass
+from isaaclab.utils.noise import AdditiveUniformNoiseCfg as Unoise
 
 from rl_training.assets.deeprobotics import DEEPROBOTICS_LITE3_CFG
 from rl_training.tasks.manager_based.locomotion.two_leg_stand import (
@@ -305,6 +306,87 @@ class Lite3TwoLegStandSafeEnvCfg(Lite3TwoLegStandStillV2EnvCfg):
         # Update termination limits to be stricter
         self.terminations.bad_orientation.params["roll_limit_rad"] = math.radians(40.0)
         self.terminations.bad_orientation.params["pitch_limit_rad"] = math.radians(90.0)
+
+
+@configclass
+class Lite3TwoLegStandRobustEnvCfg(Lite3TwoLegStandSafeEnvCfg):
+    """Lite3 two-leg standing with strong randomization and perturbations."""
+
+    def __post_init__(self):
+        super().__post_init__()
+
+        # Longer horizons improve disturbance recovery behavior.
+        self.episode_length_s = 10.0
+
+        # Use robust curriculum with lower near-goal dependence.
+        self.curriculum.phases.params["phases"] = mdp.get_two_leg_stand_robust_phases()
+        self.curriculum.phases.params["steps_per_env"] = 24
+        self.curriculum.phases.params["front_touch_termination"] = {
+            "enabled": False,
+            "metrics": {"two_leg_stability": 0.8},
+            "log_enable": True,
+        }
+
+        # Slightly smaller action scale helps survive stronger pushes.
+        self.actions.joint_pos.scale = 0.2
+
+        # Stronger observation corruption for sim-to-real robustness.
+        self.observations.policy.enable_corruption = True
+        self.observations.policy.base_ang_vel.noise = Unoise(n_min=-0.35, n_max=0.35)
+        self.observations.policy.joint_pos.noise = Unoise(n_min=-0.02, n_max=0.02)
+        self.observations.policy.joint_vel.noise = Unoise(n_min=-2.0, n_max=2.0)
+
+        # Wider dynamics randomization to cover coefficient mismatch on hardware.
+        self.events.randomize_rigid_body_material.params["static_friction_range"] = (0.05, 1.6)
+        self.events.randomize_rigid_body_material.params["dynamic_friction_range"] = (0.05, 1.4)
+        self.events.randomize_rigid_body_material.params["restitution_range"] = (0.0, 0.6)
+        self.events.randomize_rigid_body_mass.params["mass_distribution_params"] = (-2.0, 4.0)
+        self.events.randomize_com_positions.params["com_range"] = {
+            "x": (-0.08, 0.04),
+            "y": (-0.05, 0.05),
+            "z": (-0.05, 0.05),
+        }
+
+        # Re-randomize gains and motor strength every reset.
+        self.events.randomize_actuator_gains.mode = "reset"
+        self.events.randomize_actuator_gains.params["stiffness_distribution_params"] = (0.6, 1.45)
+        self.events.randomize_actuator_gains.params["damping_distribution_params"] = (0.6, 1.45)
+        self.events.randomize_motor_strength.mode = "reset"
+        self.events.randomize_motor_strength.params["strength_range"] = (0.55, 1.45)
+        self.events.randomize_motor_strength.params["apply_to_gains"] = True
+
+        # Harder reset randomization for recovery policy learning.
+        self.events.randomize_reset_joints.params["position_range"] = (0.35, 1.75)
+        self.events.randomize_reset_joints.params["velocity_range"] = (-1.0, 1.0)
+        self.events.randomize_reset_base.params["pose_range"] = {
+            "x": (-0.08, 0.08),
+            "y": (-0.08, 0.08),
+            "z": (-0.02, 0.02),
+            "roll": (-0.25, 0.25),
+            "pitch": (-0.35, 0.25),
+            "yaw": (-0.6, 0.6),
+        }
+        self.events.randomize_reset_base.params["velocity_range"] = {
+            "x": (-0.9, 0.9),
+            "y": (-0.9, 0.9),
+            "z": (-0.8, 0.8),
+            "roll": (-1.0, 1.0),
+            "pitch": (-1.0, 1.0),
+            "yaw": (-1.2, 1.2),
+        }
+
+        # Frequent and stronger interval pushes.
+        self.events.randomize_push_robot.interval_range_s = (2.0, 5.0)
+        self.events.randomize_push_robot.params["max_force"] = 26.0
+        self.events.randomize_push_robot.params["max_torque"] = 15.0
+        self.events.randomize_push_robot.params["max_vel_xy"] = 1.2
+
+        # Keep near-goal reset but with larger reset noise for robustness.
+        self.events.reset_to_near_goal.params["near_goal_prob"] = 0.0
+        self.events.reset_to_near_goal.params["pos_noise"] = 0.05
+        self.events.reset_to_near_goal.params["rot_noise"] = 0.15
+        self.events.reset_to_near_goal.params["vel_noise"] = 0.2
+        self.events.reset_to_near_goal.params["joint_noise"] = 0.15
 
 
 @configclass

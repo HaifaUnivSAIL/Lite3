@@ -73,6 +73,7 @@ from .curriculums import (
     get_two_leg_stand_still_v2_phases,
     get_two_leg_stand_safe_phases,
     get_two_leg_stand_deploy_r1_phases,
+    get_two_leg_stand_robust_phases,
     two_leg_stand_curriculum,
 )
 

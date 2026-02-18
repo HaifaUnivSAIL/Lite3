@@ -87,6 +87,55 @@ import rl_training.tasks  # noqa: F401
 from rl_training.utils.env_wrappers import RslRlCompatWrapper
 
 
+OBS_CONTRACT = [
+    ("cmd", 3),
+    ("base_rpy", 3),
+    ("body_omega", 3),
+    ("joint_pos", 12),
+    ("joint_vel", 12),
+    ("joint_pos_history", 36),
+    ("joint_vel_history", 24),
+    ("action_history", 24),
+]
+OBS_DIM = sum(dim for _, dim in OBS_CONTRACT)
+
+POLICY_JOINT_ORDER = [
+    "FL_HipX_joint",
+    "FR_HipX_joint",
+    "HL_HipX_joint",
+    "HR_HipX_joint",
+    "FL_HipY_joint",
+    "FR_HipY_joint",
+    "HL_HipY_joint",
+    "HR_HipY_joint",
+    "FL_Knee_joint",
+    "FR_Knee_joint",
+    "HL_Knee_joint",
+    "HR_Knee_joint",
+]
+# Mapping used by deploy runner: robot_idx -> policy_idx.
+POLICY_IDX_FOR_ROBOT = np.asarray([0, 4, 8, 1, 5, 9, 2, 6, 10, 3, 7, 11], dtype=np.int64)
+# Mapping used by deploy runner: policy_idx -> robot_idx.
+POLICY_FROM_ROBOT_IDX = np.asarray([0, 3, 6, 9, 1, 4, 7, 10, 2, 5, 8, 11], dtype=np.int64)
+DEFAULT_JOINT_POS_POLICY = np.asarray(
+    [
+        -0.0154048,
+        0.0159887,
+        -0.0221317,
+        0.0224431,
+        -0.76697,
+        -0.768286,
+        -0.765865,
+        -0.767203,
+        1.53761,
+        1.53636,
+        1.54788,
+        1.54679,
+    ],
+    dtype=np.float32,
+)
+
+
 def _parse_int_env(name: str, default: int = 0) -> int:
     value = os.getenv(name)
     if value is None:
@@ -108,6 +157,61 @@ def _to_cpu_numpy(value):
     if isinstance(value, torch.Tensor):
         return value.detach().cpu().numpy()
     return value
+
+
+def _first_env_numpy(value):
+    arr = _to_cpu_numpy(value)
+    if arr is None:
+        return None
+    arr = np.asarray(arr)
+    if arr.ndim >= 2 and arr.shape[0] > 0:
+        arr = arr[0]
+    return arr
+
+
+def _as_float_vec(value) -> np.ndarray | None:
+    if value is None:
+        return None
+    arr = np.asarray(value, dtype=np.float32).reshape(-1)
+    return arr
+
+
+def _quat_wxyz_to_rotmat(quat_wxyz: np.ndarray | list[float] | tuple[float, ...] | None) -> np.ndarray | None:
+    if quat_wxyz is None:
+        return None
+    q = np.asarray(quat_wxyz, dtype=np.float64).reshape(-1)
+    if q.size != 4:
+        return None
+    norm = float(np.linalg.norm(q))
+    if not np.isfinite(norm) or norm < 1.0e-8:
+        return None
+    w, x, y, z = q / norm
+    rot = np.asarray(
+        [
+            [1.0 - 2.0 * (y * y + z * z), 2.0 * (x * y - z * w), 2.0 * (x * z + y * w)],
+            [2.0 * (x * y + z * w), 1.0 - 2.0 * (x * x + z * z), 2.0 * (y * z - x * w)],
+            [2.0 * (x * z - y * w), 2.0 * (y * z + x * w), 1.0 - 2.0 * (x * x + y * y)],
+        ],
+        dtype=np.float32,
+    )
+    return rot
+
+
+def _extract_action_scale(env_cfg) -> float:
+    try:
+        action_cfg = getattr(getattr(env_cfg, "actions", None), "joint_pos", None)
+        if action_cfg is None:
+            return 1.0
+        scale = getattr(action_cfg, "scale", 1.0)
+        if isinstance(scale, (tuple, list)):
+            return float(scale[0]) if len(scale) > 0 else 1.0
+        if isinstance(scale, dict):
+            if not scale:
+                return 1.0
+            return float(next(iter(scale.values())))
+        return float(scale)
+    except Exception:
+        return 1.0
 
 
 def _ensure_world_writable(path: str) -> None:
@@ -134,6 +238,59 @@ def _ensure_world_writable(path: str) -> None:
         os.chmod(path, mode | 0o777)
     except OSError:
         pass
+
+
+def _clear_two_leg_history_caches(env) -> int:
+    """Best-effort clear cached two-leg history state on wrapper chain."""
+    cleared = 0
+    seen = set()
+    candidates = [env]
+    for _ in range(6):
+        nxt = []
+        for obj in candidates:
+            if obj is None:
+                continue
+            oid = id(obj)
+            if oid in seen:
+                continue
+            seen.add(oid)
+            for attr in ("env", "unwrapped"):
+                if hasattr(obj, attr):
+                    try:
+                        nxt.append(getattr(obj, attr))
+                    except Exception:
+                        pass
+        candidates.extend(nxt)
+
+    for obj in list(candidates):
+        if obj is None:
+            continue
+        # Clear compatibility wrapper history buffers.
+        if hasattr(obj, "obs_history"):
+            try:
+                hist = getattr(obj, "obs_history")
+                if hist is not None:
+                    if torch.is_tensor(hist):
+                        hist.zero_()
+                    else:
+                        hist[:] = 0
+                    cleared += 1
+            except Exception:
+                pass
+        # Drop cached two-leg tensors; observation helpers will lazily rebuild.
+        for name in dir(obj):
+            if not name.startswith("_two_leg_"):
+                continue
+            try:
+                delattr(obj, name)
+                cleared += 1
+            except Exception:
+                try:
+                    setattr(obj, name, None)
+                    cleared += 1
+                except Exception:
+                    pass
+    return cleared
 
 
 @hydra_task_config(args_cli.task, args_cli.agent)
@@ -293,7 +450,16 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
     # print(dt, "dt")
     # reset environment
     
-    obs = env.get_observations()
+    # Use an explicit reset so observation/history caches are deterministic for parity dumps.
+    obs = env.reset()
+    if _parse_bool_env("LITE3_PLAY_FORCE_DEPLOY_RESET", default=False):
+        cleared = _clear_two_leg_history_caches(env)
+        if cleared > 0:
+            print(f"[INFO] Cleared {cleared} cached history fields for deploy-parity reset.")
+        # Refresh observations after cache cleanup.
+        obs = env.get_observations()
+    if isinstance(obs, tuple) and len(obs) == 2:
+        obs = obs[0]
     obs_history = None
     if isinstance(obs, dict):
         obs_history = obs.get("obs_history", None)
@@ -305,6 +471,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
     debug_dump_full = _parse_bool_env("LITE3_DEBUG_PLAY_FULL", default=True)
     debug_counter = 0
     debug_dir = None
+    policy_action_scale = _extract_action_scale(env_cfg)
     if debug_quota > 0:
         run_id = os.path.basename(os.path.normpath(log_dir)) if log_dir else "unknown_run"
         default_root = "/workspace/rl_training_new/lite3_debug/train"
@@ -340,26 +507,176 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
         else:
             obs_flat = np.concatenate([obs0, hist0], axis=-1)
 
-        # Extract key slices (matches deploy observation builder).
+        # Extract key slices (matches deploy observation builder / contract).
         cmd = obs0[0:3]
         base_rpy = obs0[3:6]
         body_omega = obs0[6:9]
         joint_pos = obs0[9:21]
         joint_vel = obs0[21:33]
+        joint_pos_history = obs0[33:69]
+        joint_vel_history = obs0[69:93]
+        action_history = obs0[93:117]
+
+        actions0 = act_np[0] if act_np is not None and getattr(act_np, "ndim", 0) >= 2 else act_np
+        actions0 = _as_float_vec(actions0)
+
+        # Optional extended parity debug fields (state + control path).
+        extended_payload = {}
+        if debug_dump_full:
+            robot = None
+            robot_data = None
+            try:
+                robot = env.unwrapped.scene["robot"]
+                robot_data = getattr(robot, "data", None)
+            except Exception:
+                robot = None
+                robot_data = None
+
+            base_quat_wxyz = _as_float_vec(
+                _first_env_numpy(getattr(robot_data, "root_quat_w", None)) if robot_data is not None else None
+            )
+            projected_gravity = _as_float_vec(
+                _first_env_numpy(getattr(robot_data, "projected_gravity_b", None)) if robot_data is not None else None
+            )
+            omega_world = _as_float_vec(
+                _first_env_numpy(getattr(robot_data, "root_ang_vel_w", None)) if robot_data is not None else None
+            )
+            base_rot_mat = _quat_wxyz_to_rotmat(base_quat_wxyz)
+
+            joint_pos_robot = _as_float_vec(
+                _first_env_numpy(getattr(robot_data, "joint_pos", None)) if robot_data is not None else None
+            )
+            joint_vel_robot = _as_float_vec(
+                _first_env_numpy(getattr(robot_data, "joint_vel", None)) if robot_data is not None else None
+            )
+            joint_stiffness = _as_float_vec(
+                _first_env_numpy(getattr(robot_data, "joint_stiffness", None)) if robot_data is not None else None
+            )
+            joint_damping = _as_float_vec(
+                _first_env_numpy(getattr(robot_data, "joint_damping", None)) if robot_data is not None else None
+            )
+            default_joint_pos_robot = _as_float_vec(
+                _first_env_numpy(getattr(robot_data, "default_joint_pos", None)) if robot_data is not None else None
+            )
+
+            soft_limits = _first_env_numpy(getattr(robot_data, "soft_joint_pos_limits", None)) if robot_data is not None else None
+            joint_limits_lower = None
+            joint_limits_upper = None
+            if soft_limits is not None:
+                soft_limits = np.asarray(soft_limits, dtype=np.float32)
+                if soft_limits.ndim == 2 and soft_limits.shape[1] >= 2:
+                    joint_limits_lower = soft_limits[:, 0].reshape(-1)
+                    joint_limits_upper = soft_limits[:, 1].reshape(-1)
+
+            effort_limits = None
+            if robot_data is not None:
+                for attr_name in (
+                    "joint_effort_limits",
+                    "joint_effort_limit",
+                    "actuator_effort_limits",
+                    "joint_torque_limits",
+                    "joint_torque_limit",
+                ):
+                    raw = getattr(robot_data, attr_name, None)
+                    if raw is not None:
+                        effort_limits = _as_float_vec(_first_env_numpy(raw))
+                        if effort_limits is not None:
+                            break
+
+            act_dim = 12
+            if actions0 is not None and actions0.size >= act_dim:
+                action_raw = actions0[:act_dim].astype(np.float32, copy=False)
+                action_offset = action_raw * np.float32(policy_action_scale)
+                target_joint_pos_policy = DEFAULT_JOINT_POS_POLICY + action_offset
+                target_joint_pos_robot = target_joint_pos_policy[POLICY_IDX_FOR_ROBOT]
+
+                target_joint_pos_clipped = target_joint_pos_robot.copy()
+                if joint_limits_lower is not None and joint_limits_upper is not None:
+                    if joint_limits_lower.size >= act_dim and joint_limits_upper.size >= act_dim:
+                        target_joint_pos_clipped = np.clip(
+                            target_joint_pos_clipped,
+                            joint_limits_lower[:act_dim],
+                            joint_limits_upper[:act_dim],
+                        )
+
+                pd_tau_raw_est = None
+                pd_tau_clipped_est = None
+                if joint_pos_robot is not None and joint_vel_robot is not None:
+                    if joint_pos_robot.size >= act_dim and joint_vel_robot.size >= act_dim:
+                        kp = np.full((act_dim,), 20.0, dtype=np.float32)
+                        kd = np.full((act_dim,), 0.7, dtype=np.float32)
+                        if joint_stiffness is not None and joint_stiffness.size >= act_dim:
+                            kp = joint_stiffness[:act_dim].astype(np.float32, copy=False)
+                        if joint_damping is not None and joint_damping.size >= act_dim:
+                            kd = joint_damping[:act_dim].astype(np.float32, copy=False)
+                        pd_tau_raw_est = kp * (target_joint_pos_robot - joint_pos_robot[:act_dim]) + kd * (
+                            -joint_vel_robot[:act_dim]
+                        )
+                        pd_tau_clipped_est = pd_tau_raw_est.copy()
+                        if effort_limits is not None and effort_limits.size >= act_dim:
+                            lim = effort_limits[:act_dim]
+                            pd_tau_clipped_est = np.clip(pd_tau_clipped_est, -lim, lim)
+
+                extended_payload.update(
+                    {
+                        "action_offset": action_offset.astype(np.float32, copy=False),
+                        "target_joint_pos_policy": target_joint_pos_policy.astype(np.float32, copy=False),
+                        "target_joint_pos_robot": target_joint_pos_robot.astype(np.float32, copy=False),
+                        "target_joint_pos_clipped": target_joint_pos_clipped.astype(np.float32, copy=False),
+                    }
+                )
+                if pd_tau_raw_est is not None:
+                    extended_payload["pd_tau_raw_est"] = pd_tau_raw_est.astype(np.float32, copy=False)
+                if pd_tau_clipped_est is not None:
+                    extended_payload["pd_tau_clipped_est"] = pd_tau_clipped_est.astype(np.float32, copy=False)
+                if default_joint_pos_robot is not None and default_joint_pos_robot.size >= act_dim:
+                    default_joint_pos_policy = default_joint_pos_robot[:act_dim][POLICY_FROM_ROBOT_IDX]
+                    extended_payload["default_joint_pos_policy"] = default_joint_pos_policy.astype(np.float32, copy=False)
+
+            if base_quat_wxyz is not None and base_quat_wxyz.size >= 4:
+                extended_payload["base_quat_wxyz"] = base_quat_wxyz[:4].astype(np.float32, copy=False)
+            if base_rot_mat is not None:
+                extended_payload["base_rot_mat"] = base_rot_mat.reshape(-1).astype(np.float32, copy=False)
+            if projected_gravity is not None and projected_gravity.size >= 3:
+                extended_payload["projected_gravity"] = projected_gravity[:3].astype(np.float32, copy=False)
+            if omega_world is not None and omega_world.size >= 3:
+                extended_payload["omega_world"] = omega_world[:3].astype(np.float32, copy=False)
+            if joint_pos_robot is not None and joint_pos_robot.size >= act_dim:
+                extended_payload["joint_pos_robot"] = joint_pos_robot[:act_dim].astype(np.float32, copy=False)
+            if joint_vel_robot is not None and joint_vel_robot.size >= act_dim:
+                extended_payload["joint_vel_robot"] = joint_vel_robot[:act_dim].astype(np.float32, copy=False)
+            if joint_limits_lower is not None and joint_limits_lower.size >= act_dim:
+                extended_payload["joint_limits_lower"] = joint_limits_lower[:act_dim].astype(np.float32, copy=False)
+            if joint_limits_upper is not None and joint_limits_upper.size >= act_dim:
+                extended_payload["joint_limits_upper"] = joint_limits_upper[:act_dim].astype(np.float32, copy=False)
+            if effort_limits is not None and effort_limits.size >= act_dim:
+                extended_payload["effort_limits"] = effort_limits[:act_dim].astype(np.float32, copy=False)
+            if joint_stiffness is not None and joint_stiffness.size >= act_dim:
+                extended_payload["joint_stiffness"] = joint_stiffness[:act_dim].astype(np.float32, copy=False)
+            if joint_damping is not None and joint_damping.size >= act_dim:
+                extended_payload["joint_damping"] = joint_damping[:act_dim].astype(np.float32, copy=False)
 
         out_path = os.path.join(debug_dir, f"debug_play_step{step_idx}.npz")
-        np.savez(
-            out_path,
-            obs=obs0,
-            obs_history=hist0,
-            obs_flat=obs_flat,
-            actions=act_np[0] if act_np is not None and act_np.ndim >= 2 else act_np,
-            cmd=cmd,
-            base_rpy=base_rpy,
-            body_omega=body_omega,
-            joint_pos=joint_pos,
-            joint_vel=joint_vel,
-        )
+        payload = {
+            "obs_contract_names": np.asarray([name for name, _ in OBS_CONTRACT]),
+            "obs_contract_dims": np.asarray([dim for _, dim in OBS_CONTRACT], dtype=np.int32),
+            "obs": obs0,
+            "obs_history": hist0,
+            "obs_flat": obs_flat,
+            "actions": actions0,
+            "cmd": cmd,
+            "base_rpy": base_rpy,
+            "body_omega": body_omega,
+            "joint_pos": joint_pos,
+            "joint_vel": joint_vel,
+            "joint_pos_history": joint_pos_history,
+            "joint_vel_history": joint_vel_history,
+            "action_history": action_history,
+            "policy_action_scale": np.asarray([policy_action_scale], dtype=np.float32),
+            "policy_joint_order": np.asarray(POLICY_JOINT_ORDER),
+        }
+        payload.update(extended_payload)
+        np.savez(out_path, **payload)
 
     timestep = 0
     # simulate environment

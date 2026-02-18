@@ -11,6 +11,7 @@ from .base_env_cfg import (
     Lite3TwoLegStandStillEnvCfg,
     Lite3TwoLegStandStillV2EnvCfg,
     Lite3TwoLegStandSafeEnvCfg,
+    Lite3TwoLegStandRobustEnvCfg,
     Lite3TwoLegStandDeployAlignedEnvCfg,
     Lite3TwoLegStandDeployR1EnvCfg,
 )
@@ -60,6 +61,17 @@ gym.register(
     kwargs={
         "env_cfg_entry_point": f"{__name__}.base_env_cfg:Lite3TwoLegStandSafeEnvCfg",
         "rsl_rl_cfg_entry_point": f"{agents.__name__}.rsl_rl_ppo_cfg:Lite3TwoLegStandSafePPORunnerCfg",
+    },
+)
+
+# Two-leg standing with robust randomization and perturbation training
+gym.register(
+    id="TwoLegStandRobust-Deeprobotics-Lite3-v0",
+    entry_point="isaaclab.envs:ManagerBasedRLEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": f"{__name__}.base_env_cfg:Lite3TwoLegStandRobustEnvCfg",
+        "rsl_rl_cfg_entry_point": f"{agents.__name__}.rsl_rl_ppo_cfg:Lite3TwoLegStandRobustPPORunnerCfg",
     },
 )
 
@@ -130,6 +142,16 @@ gym.register(
 )
 
 gym.register(
+    id="lite3_two_leg_stand_robust",
+    entry_point="isaaclab.envs:ManagerBasedRLEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": f"{__name__}.base_env_cfg:Lite3TwoLegStandRobustEnvCfg",
+        "rsl_rl_cfg_entry_point": f"{agents.__name__}.rsl_rl_ppo_cfg:Lite3TwoLegStandRobustPPORunnerCfg",
+    },
+)
+
+gym.register(
     id="lite3_two_leg_stand_deploy_aligned",
     entry_point="isaaclab.envs:ManagerBasedRLEnv",
     disable_env_checker=True,
@@ -146,6 +168,16 @@ gym.register(
     kwargs={
         "env_cfg_entry_point": f"{__name__}.base_env_cfg:Lite3TwoLegStandDeployR1EnvCfg",
         "rsl_rl_cfg_entry_point": f"{agents.__name__}.rsl_rl_ppo_cfg:Lite3TwoLegStandDeployR1PPORunnerCfg",
+    },
+)
+
+gym.register(
+    id="two_leg_stand_robust",
+    entry_point="isaaclab.envs:ManagerBasedRLEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": f"{__name__}.base_env_cfg:Lite3TwoLegStandRobustEnvCfg",
+        "rsl_rl_cfg_entry_point": f"{agents.__name__}.rsl_rl_ppo_cfg:Lite3TwoLegStandRobustPPORunnerCfg",
     },
 )
 

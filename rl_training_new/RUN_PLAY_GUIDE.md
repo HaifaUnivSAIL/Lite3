@@ -14,10 +14,12 @@ Isaac Lab stack (ManagerBasedRLEnv, registered in rl_training tasks):
 - TwoLegStandStill-Deeprobotics-Lite3-v0
 - TwoLegStandStillV2-Deeprobotics-Lite3-v0
 - TwoLegStandSafe-Deeprobotics-Lite3-v0
+- TwoLegStandRobust-Deeprobotics-Lite3-v0
 - TwoLegStandDeployAligned-Deeprobotics-Lite3-v0
 - TwoLegStandDeployR1-Deeprobotics-Lite3-v0
-- Legacy aliases: lite3_two_leg_stand, lite3_two_leg_stand_still, lite3_two_leg_stand_still_v2, lite3_two_leg_stand_still_safe, lite3_two_leg_stand_deploy_aligned
+- Legacy aliases: lite3_two_leg_stand, lite3_two_leg_stand_still, lite3_two_leg_stand_still_v2, lite3_two_leg_stand_still_safe, lite3_two_leg_stand_robust, lite3_two_leg_stand_deploy_aligned
 - Legacy alias (deploy/r1): lite3_two_leg_stand_deploy_r1
+- Compatibility alias: two_leg_stand_robust
 
 Legacy legged_gym stack (registered in legged_gym helpers):
 - lite3_two_leg_stand
@@ -47,6 +49,15 @@ python scripts/reinforcement_learning/rsl_rl/train.py \
 ```bash
 python scripts/reinforcement_learning/rsl_rl/train.py \
   --task=TwoLegStandDeployR1-Deeprobotics-Lite3-v0 \
+  --headless
+```
+
+### Train (robust randomization + perturbation curriculum)
+
+```bash
+python scripts/reinforcement_learning/rsl_rl/train.py \
+  --task=TwoLegStandRobust-Deeprobotics-Lite3-v0 \
+  --run_name robust_rand_v1 \
   --headless
 ```
 
@@ -105,6 +116,15 @@ python scripts/reinforcement_learning/rsl_rl/play.py \
 python scripts/reinforcement_learning/rsl_rl/play.py \
   --task=TwoLegStandDeployR1-Deeprobotics-Lite3-v0 \
   --load_run r1 \
+  --checkpoint model_best.pt
+```
+
+### Play (robust task example)
+
+```bash
+python scripts/reinforcement_learning/rsl_rl/play.py \
+  --task=TwoLegStandRobust-Deeprobotics-Lite3-v0 \
+  --load_run <timestamp>_robust_rand_v1 \
   --checkpoint model_best.pt
 ```
 
