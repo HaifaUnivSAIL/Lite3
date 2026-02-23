@@ -11,9 +11,12 @@ from .base_env_cfg import (
     Lite3TwoLegStandStillEnvCfg,
     Lite3TwoLegStandStillV2EnvCfg,
     Lite3TwoLegStandSafeEnvCfg,
+    Lite3TwoLegStandSafeSlowLowPowerEnvCfg,
     Lite3TwoLegStandRobustEnvCfg,
     Lite3TwoLegStandDeployAlignedEnvCfg,
     Lite3TwoLegStandDeployR1EnvCfg,
+    Lite3TwoLegStandDeployR12MimicEnvCfg,
+    Lite3TwoLegStandDeploySafeV2EnvCfg,
 )
 
 ##
@@ -64,6 +67,17 @@ gym.register(
     },
 )
 
+# Two-leg standing scaffold for safe/slow/low-power reward development
+gym.register(
+    id="TwoLegStandSafeSlowLowPower-Deeprobotics-Lite3-v0",
+    entry_point="isaaclab.envs:ManagerBasedRLEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": f"{__name__}.base_env_cfg:Lite3TwoLegStandSafeSlowLowPowerEnvCfg",
+        "rsl_rl_cfg_entry_point": f"{agents.__name__}.rsl_rl_ppo_cfg:Lite3TwoLegStandSafeSlowLowPowerPPORunnerCfg",
+    },
+)
+
 # Two-leg standing with robust randomization and perturbation training
 gym.register(
     id="TwoLegStandRobust-Deeprobotics-Lite3-v0",
@@ -94,6 +108,28 @@ gym.register(
     kwargs={
         "env_cfg_entry_point": f"{__name__}.base_env_cfg:Lite3TwoLegStandDeployR1EnvCfg",
         "rsl_rl_cfg_entry_point": f"{agents.__name__}.rsl_rl_ppo_cfg:Lite3TwoLegStandDeployR1PPORunnerCfg",
+    },
+)
+
+# Two-leg standing deploy/r1-r2 mimic baseline (isolated task)
+gym.register(
+    id="TwoLegStandDeployR12Mimic-Deeprobotics-Lite3-v0",
+    entry_point="isaaclab.envs:ManagerBasedRLEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": f"{__name__}.base_env_cfg:Lite3TwoLegStandDeployR12MimicEnvCfg",
+        "rsl_rl_cfg_entry_point": f"{agents.__name__}.rsl_rl_ppo_cfg:Lite3TwoLegStandDeployR12MimicPPORunnerCfg",
+    },
+)
+
+# Two-leg standing deploy safe-v2 (improved curriculum progression)
+gym.register(
+    id="TwoLegStandDeploySafeV2-Deeprobotics-Lite3-v0",
+    entry_point="isaaclab.envs:ManagerBasedRLEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": f"{__name__}.base_env_cfg:Lite3TwoLegStandDeploySafeV2EnvCfg",
+        "rsl_rl_cfg_entry_point": f"{agents.__name__}.rsl_rl_ppo_cfg:Lite3TwoLegStandDeploySafeV2PPORunnerCfg",
     },
 )
 
@@ -142,6 +178,16 @@ gym.register(
 )
 
 gym.register(
+    id="lite3_two_leg_stand_safe_slow_low_power",
+    entry_point="isaaclab.envs:ManagerBasedRLEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": f"{__name__}.base_env_cfg:Lite3TwoLegStandSafeSlowLowPowerEnvCfg",
+        "rsl_rl_cfg_entry_point": f"{agents.__name__}.rsl_rl_ppo_cfg:Lite3TwoLegStandSafeSlowLowPowerPPORunnerCfg",
+    },
+)
+
+gym.register(
     id="lite3_two_leg_stand_robust",
     entry_point="isaaclab.envs:ManagerBasedRLEnv",
     disable_env_checker=True,
@@ -172,12 +218,52 @@ gym.register(
 )
 
 gym.register(
+    id="lite3_two_leg_stand_deploy_r12_mimic",
+    entry_point="isaaclab.envs:ManagerBasedRLEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": f"{__name__}.base_env_cfg:Lite3TwoLegStandDeployR12MimicEnvCfg",
+        "rsl_rl_cfg_entry_point": f"{agents.__name__}.rsl_rl_ppo_cfg:Lite3TwoLegStandDeployR12MimicPPORunnerCfg",
+    },
+)
+
+gym.register(
+    id="lite3_two_leg_stand_deploy_safe_v2",
+    entry_point="isaaclab.envs:ManagerBasedRLEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": f"{__name__}.base_env_cfg:Lite3TwoLegStandDeploySafeV2EnvCfg",
+        "rsl_rl_cfg_entry_point": f"{agents.__name__}.rsl_rl_ppo_cfg:Lite3TwoLegStandDeploySafeV2PPORunnerCfg",
+    },
+)
+
+gym.register(
     id="two_leg_stand_robust",
     entry_point="isaaclab.envs:ManagerBasedRLEnv",
     disable_env_checker=True,
     kwargs={
         "env_cfg_entry_point": f"{__name__}.base_env_cfg:Lite3TwoLegStandRobustEnvCfg",
         "rsl_rl_cfg_entry_point": f"{agents.__name__}.rsl_rl_ppo_cfg:Lite3TwoLegStandRobustPPORunnerCfg",
+    },
+)
+
+gym.register(
+    id="two_leg_stand_deploy_r12_mimic",
+    entry_point="isaaclab.envs:ManagerBasedRLEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": f"{__name__}.base_env_cfg:Lite3TwoLegStandDeployR12MimicEnvCfg",
+        "rsl_rl_cfg_entry_point": f"{agents.__name__}.rsl_rl_ppo_cfg:Lite3TwoLegStandDeployR12MimicPPORunnerCfg",
+    },
+)
+
+gym.register(
+    id="two_leg_stand_deploy_safe_v2",
+    entry_point="isaaclab.envs:ManagerBasedRLEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": f"{__name__}.base_env_cfg:Lite3TwoLegStandDeploySafeV2EnvCfg",
+        "rsl_rl_cfg_entry_point": f"{agents.__name__}.rsl_rl_ppo_cfg:Lite3TwoLegStandDeploySafeV2PPORunnerCfg",
     },
 )
 

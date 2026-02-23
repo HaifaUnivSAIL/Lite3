@@ -54,6 +54,11 @@ from .rewards import (
     two_leg_stand_metric,
     two_leg_stand_metric_components,
     two_leg_stability_safe,
+    # Safe/slow/low-power rewards
+    two_leg_state_hold_bonus,
+    transition_dynamics_penalty,
+    effort_bundle_penalty,
+    fall_after_stand_penalty,
 )
 
 from .events import (
@@ -74,6 +79,9 @@ from .curriculums import (
     get_two_leg_stand_still_v2_phases,
     get_two_leg_stand_safe_phases,
     get_two_leg_stand_deploy_r1_phases,
+    get_two_leg_stand_deploy_r12_mimic_phases,
+    get_two_leg_stand_deploy_safe_v2_phases,
+    get_two_leg_stand_safe_slow_low_power_phases,
     get_two_leg_stand_robust_phases,
     two_leg_stand_curriculum,
 )

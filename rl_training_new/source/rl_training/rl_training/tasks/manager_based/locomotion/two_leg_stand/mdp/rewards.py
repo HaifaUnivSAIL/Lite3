@@ -10,6 +10,7 @@ import math
 import torch
 from typing import TYPE_CHECKING
 
+from isaaclab.envs import mdp as base_mdp
 from isaaclab.assets import Articulation, RigidObject
 from isaaclab.managers import SceneEntityCfg
 from isaaclab.sensors import ContactSensor
@@ -719,10 +720,10 @@ def hind_leg_extension_geom(
     L = torch.norm(v, dim=2)  # (N, 2)
     length_norm = torch.clamp(L.mean(dim=1) / 0.4, 0.0, 1.0)
 
-    # Vertical alignment (match legged_gym sign convention)
+    # Vertical alignment in Z-up world: feet are below hips, so hip->foot vz is negative.
     L_safe = L + 1e-6
     vz = v[:, :, 2]  # (N, 2)
-    align = torch.clamp(vz / L_safe, 0.0, 1.0).mean(dim=1)
+    align = torch.clamp((-vz) / L_safe, 0.0, 1.0).mean(dim=1)
 
     # Horizontal splay penalty
     horiz = torch.norm(v[:, :, :2], dim=2).mean(dim=1)
@@ -859,12 +860,17 @@ def stand_still_lin_z(
 
 def base_height_bonus(
     env: ManagerBasedRLEnv,
-    min_height: float = 0.55,
-    max_height: float = 0.8,
+    min_height: float = 0.45,
+    max_height: float = 0.75,
     hind_feet_sensor_cfg: SceneEntityCfg = None,
+    front_feet_sensor_cfg: SceneEntityCfg = None,
     asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
 ) -> torch.Tensor:
-    """Bonus reward for reaching target base height."""
+    """Bonus reward for achieving and increasing two-leg base height.
+
+    This reward is gated by hind support and (optionally) front-feet clearance,
+    so the policy is incentivized to rise while maintaining true two-leg posture.
+    """
     asset: Articulation = env.scene[asset_cfg.name]
 
     base_height = asset.data.root_pos_w[:, 2]
@@ -873,11 +879,17 @@ def base_height_bonus(
 
     if hind_feet_sensor_cfg is not None:
         hind_support = _get_hind_feet_contact(env, hind_feet_sensor_cfg)
-        contact_gate = hind_support.float()
+        hind_support_gate = hind_support.float()
     else:
-        contact_gate = torch.ones(env.num_envs, device=env.device)
+        hind_support_gate = torch.ones(env.num_envs, device=env.device)
 
-    return bonus * contact_gate
+    if front_feet_sensor_cfg is not None:
+        front_contact = _get_front_feet_contact(env, front_feet_sensor_cfg)
+        front_clear_gate = (~front_contact).float()
+    else:
+        front_clear_gate = torch.ones(env.num_envs, device=env.device)
+
+    return bonus * hind_support_gate * front_clear_gate
 
 
 # =============================================================================
@@ -1079,6 +1091,275 @@ def collision(
     current_forces = net_forces[:, -1, sensor_cfg.body_ids]
     in_contact = torch.norm(current_forces, dim=-1) > threshold
     return torch.sum(in_contact.float(), dim=1)
+
+
+# =============================================================================
+# Safe/Slow/Low-Power Rewards
+# =============================================================================
+
+def _update_two_leg_state_tracker(
+    env: ManagerBasedRLEnv,
+    metric: torch.Tensor,
+    enter_threshold: float,
+    exit_threshold: float,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Update and return stateful two-leg standing tracker buffers.
+
+    Returns:
+        in_state (bool), hold_steps (float), ever_reached (bool)
+    """
+    num_envs = int(metric.shape[0])
+    device = metric.device
+
+    if (
+        not hasattr(env, "_two_leg_state_in")
+        or getattr(env, "_two_leg_state_in").shape[0] != num_envs
+    ):
+        env._two_leg_state_in = torch.zeros(num_envs, dtype=torch.bool, device=device)
+        env._two_leg_state_hold_steps = torch.zeros(num_envs, dtype=torch.float32, device=device)
+        env._two_leg_state_ever_reached = torch.zeros(num_envs, dtype=torch.bool, device=device)
+        env._two_leg_state_last_hold_before_fall = torch.zeros(num_envs, dtype=torch.float32, device=device)
+        env._two_leg_state_update_step = None
+
+    in_state = env._two_leg_state_in
+    hold_steps = env._two_leg_state_hold_steps
+    ever_reached = env._two_leg_state_ever_reached
+
+    reset_mask = None
+    if hasattr(env, "episode_length_buf") and env.episode_length_buf is not None:
+        reset_mask = env.episode_length_buf == 0
+
+    step = getattr(env, "common_step_counter", None)
+    last_step = getattr(env, "_two_leg_state_update_step", None)
+
+    if last_step != step:
+        if reset_mask is not None and reset_mask.any():
+            in_state = in_state.clone()
+            hold_steps = hold_steps.clone()
+            ever_reached = ever_reached.clone()
+            last_hold = env._two_leg_state_last_hold_before_fall.clone()
+            in_state[reset_mask] = False
+            hold_steps[reset_mask] = 0.0
+            ever_reached[reset_mask] = False
+            last_hold[reset_mask] = 0.0
+            env._two_leg_state_last_hold_before_fall = last_hold
+
+        entered = (~in_state) & (metric >= float(enter_threshold))
+        staying = in_state & (metric >= float(exit_threshold))
+        in_state = staying | entered
+        hold_steps = torch.where(in_state, hold_steps + 1.0, torch.zeros_like(hold_steps))
+        ever_reached = ever_reached | in_state
+
+        env._two_leg_state_in = in_state
+        env._two_leg_state_hold_steps = hold_steps
+        env._two_leg_state_ever_reached = ever_reached
+        env._two_leg_state_update_step = step
+    elif reset_mask is not None and reset_mask.any():
+        # Handle reset occurring inside the same step to keep state buffers consistent.
+        in_state = in_state.clone()
+        hold_steps = hold_steps.clone()
+        ever_reached = ever_reached.clone()
+        last_hold = env._two_leg_state_last_hold_before_fall.clone()
+        in_state[reset_mask] = False
+        hold_steps[reset_mask] = 0.0
+        ever_reached[reset_mask] = False
+        last_hold[reset_mask] = 0.0
+        env._two_leg_state_in = in_state
+        env._two_leg_state_hold_steps = hold_steps
+        env._two_leg_state_ever_reached = ever_reached
+        env._two_leg_state_last_hold_before_fall = last_hold
+
+    return env._two_leg_state_in, env._two_leg_state_hold_steps, env._two_leg_state_ever_reached
+
+
+def two_leg_state_hold_bonus(
+    env: ManagerBasedRLEnv,
+    front_feet_sensor_cfg: SceneEntityCfg,
+    hind_feet_sensor_cfg: SceneEntityCfg,
+    front_feet_body_cfg: SceneEntityCfg = None,
+    pitch_tolerance: float = 0.35,
+    pitch_target: float = -1.22,
+    enter_threshold: float = 0.80,
+    exit_threshold: float = 0.70,
+    tau_hold: float = 60.0,
+    hold_cap: float = 1.0,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+) -> torch.Tensor:
+    """Reward cumulative stable hold once two-leg stand is reached."""
+    metric = two_leg_stand_metric(
+        env=env,
+        front_feet_sensor_cfg=front_feet_sensor_cfg,
+        hind_feet_sensor_cfg=hind_feet_sensor_cfg,
+        front_feet_body_cfg=front_feet_body_cfg,
+        pitch_tolerance=pitch_tolerance,
+        pitch_target=pitch_target,
+        asset_cfg=asset_cfg,
+    )
+    in_state, hold_steps, _ = _update_two_leg_state_tracker(
+        env=env,
+        metric=metric,
+        enter_threshold=enter_threshold,
+        exit_threshold=exit_threshold,
+    )
+    tau = max(float(tau_hold), 1e-6)
+    reward = in_state.float() * (1.0 - torch.exp(-hold_steps / tau))
+    if hold_cap is not None:
+        reward = torch.clamp(reward, max=float(hold_cap))
+    return reward
+
+
+def transition_dynamics_penalty(
+    env: ManagerBasedRLEnv,
+    front_feet_sensor_cfg: SceneEntityCfg,
+    hind_feet_sensor_cfg: SceneEntityCfg,
+    front_feet_body_cfg: SceneEntityCfg = None,
+    pitch_tolerance: float = 0.35,
+    pitch_target: float = -1.22,
+    enter_threshold: float = 0.80,
+    exit_threshold: float = 0.70,
+    hold_grace_steps: int = 20,
+    activation_metric_threshold: float = 0.45,
+    lin_vel_z_ref: float = 0.35,
+    ang_vel_xy_ref: float = 2.0,
+    dof_acc_ref: float = 80.0,
+    action_rate_ref: float = 0.35,
+    dyn_cap: float | None = 2.5,
+    w_lin_z: float = 1.0,
+    w_ang_xy: float = 1.0,
+    w_dof_acc: float = 0.1,
+    w_action_rate: float = 0.2,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+) -> torch.Tensor:
+    """Penalty for aggressive transition dynamics while entering two-leg stand.
+
+    Notes:
+    - The term is activation-gated by the two-leg metric proximity so early broad
+      exploration is not suppressed.
+    - Each component is normalized and clamped to avoid large-magnitude spikes.
+    """
+    metric = two_leg_stand_metric(
+        env=env,
+        front_feet_sensor_cfg=front_feet_sensor_cfg,
+        hind_feet_sensor_cfg=hind_feet_sensor_cfg,
+        front_feet_body_cfg=front_feet_body_cfg,
+        pitch_tolerance=pitch_tolerance,
+        pitch_target=pitch_target,
+        asset_cfg=asset_cfg,
+    )
+    _, hold_steps, ever_reached = _update_two_leg_state_tracker(
+        env=env,
+        metric=metric,
+        enter_threshold=enter_threshold,
+        exit_threshold=exit_threshold,
+    )
+    if hold_grace_steps > 0:
+        active_gate = (~(ever_reached & (hold_steps >= float(hold_grace_steps)))).float()
+    else:
+        active_gate = (~ever_reached).float()
+
+    start_threshold = min(float(activation_metric_threshold), float(enter_threshold) - 1e-3)
+    denom = max(float(enter_threshold) - start_threshold, 1e-6)
+    proximity_gate = torch.clamp((metric - start_threshold) / denom, min=0.0, max=1.0)
+
+    asset: Articulation = env.scene[asset_cfg.name]
+    dof_count = max(int(asset.data.joint_vel.shape[1]), 1)
+    action_count = max(int(env.action_manager.action.shape[1]), 1)
+
+    lin_term = torch.clamp(
+        lin_vel_z(env, asset_cfg=asset_cfg) / max(float(lin_vel_z_ref) ** 2, 1e-6),
+        min=0.0,
+        max=1.0,
+    )
+    ang_term = torch.clamp(
+        ang_vel_xy(env, asset_cfg=asset_cfg) / max(float(ang_vel_xy_ref) ** 2, 1e-6),
+        min=0.0,
+        max=1.0,
+    )
+    dof_acc_term = torch.clamp(
+        dof_acc(env, asset_cfg=asset_cfg) / max(dof_count * (float(dof_acc_ref) ** 2), 1e-6),
+        min=0.0,
+        max=1.0,
+    )
+    action_rate_term = torch.clamp(
+        action_rate(env) / max(action_count * (float(action_rate_ref) ** 2), 1e-6),
+        min=0.0,
+        max=1.0,
+    )
+
+    raw_dyn = (
+        float(w_lin_z) * lin_term
+        + float(w_ang_xy) * ang_term
+        + float(w_dof_acc) * dof_acc_term
+        + float(w_action_rate) * action_rate_term
+    )
+    if dyn_cap is not None:
+        raw_dyn = torch.clamp(raw_dyn, max=float(dyn_cap))
+
+    return active_gate * proximity_gate * raw_dyn
+
+
+def effort_bundle_penalty(
+    env: ManagerBasedRLEnv,
+    torque_soft_limit: float = 0.9,
+    dof_vel_soft_limit: float = 0.9,
+    w_torque_limits: float = 1.0,
+    w_dof_vel_limits: float = 1.0,
+    w_power: float = 0.01,
+    w_action_magnitude: float = 0.05,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+) -> torch.Tensor:
+    """Proportional effort penalty over torque/velocity limits, power and action magnitude."""
+    return (
+        float(w_torque_limits) * torque_limits(env, soft_limit=torque_soft_limit, asset_cfg=asset_cfg)
+        + float(w_dof_vel_limits) * dof_vel_limits(env, soft_limit=dof_vel_soft_limit, asset_cfg=asset_cfg)
+        + float(w_power) * power(env, asset_cfg=asset_cfg)
+        + float(w_action_magnitude) * action_magnitude(env)
+    )
+
+
+def fall_after_stand_penalty(
+    env: ManagerBasedRLEnv,
+    front_feet_sensor_cfg: SceneEntityCfg,
+    hind_feet_sensor_cfg: SceneEntityCfg,
+    front_feet_body_cfg: SceneEntityCfg = None,
+    pitch_tolerance: float = 0.35,
+    pitch_target: float = -1.22,
+    enter_threshold: float = 0.80,
+    exit_threshold: float = 0.70,
+    base_fall_penalty: float = 1.0,
+    hold_scale: float = 1.0,
+    hold_ref_steps: float = 120.0,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+) -> torch.Tensor:
+    """Penalty applied when episode terminates after two-leg stand was reached."""
+    metric = two_leg_stand_metric(
+        env=env,
+        front_feet_sensor_cfg=front_feet_sensor_cfg,
+        hind_feet_sensor_cfg=hind_feet_sensor_cfg,
+        front_feet_body_cfg=front_feet_body_cfg,
+        pitch_tolerance=pitch_tolerance,
+        pitch_target=pitch_target,
+        asset_cfg=asset_cfg,
+    )
+    _, hold_steps, ever_reached = _update_two_leg_state_tracker(
+        env=env,
+        metric=metric,
+        enter_threshold=enter_threshold,
+        exit_threshold=exit_threshold,
+    )
+
+    terminated = base_mdp.is_terminated(env)
+    term_mask = terminated > 0.0
+    hold_ref = max(float(hold_ref_steps), 1e-6)
+    hold_factor = torch.clamp(hold_steps / hold_ref, min=0.0, max=1.0)
+    severity = float(base_fall_penalty) * (1.0 + float(hold_scale) * hold_factor)
+
+    if term_mask.any():
+        last_hold = env._two_leg_state_last_hold_before_fall.clone()
+        last_hold[term_mask] = hold_steps[term_mask]
+        env._two_leg_state_last_hold_before_fall = last_hold
+
+    return term_mask.float() * ever_reached.float() * severity
 
 
 # =============================================================================

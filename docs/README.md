@@ -11,4 +11,5 @@ Use this index when navigating documentation across the full Lite3 workspace.
 ## Common Workflows
 - `../rl_training_new/docs/guides/run-play.md`: Train/play commands and debug dump flow.
 - `../rl_training_new/docs/workflows/experiment-workflow.md`: Train -> export -> deploy parity workflow.
+- `../rl_training_new/docs/workflows/two-leg-stand-policy-to-robot.md`: End-to-end workflow from successful training recipe to robot deployment notes.
 - `../rl_training_new/docs/operations/training-stack-deployment-checklist.md`: Release checklist for deploy-ready training runs.

@@ -122,6 +122,30 @@ def _history_mode_label() -> str:
     return "default_reset_on_done"
 
 
+def _resolve_resume_log_dir(log_root_path: str, load_run, load_checkpoint) -> str | None:
+    """Resolve an existing run directory for in-place resume, if available."""
+    root_abs = os.path.abspath(log_root_path)
+
+    load_run_name = str(load_run).strip() if load_run is not None else ""
+    if load_run_name and load_run_name not in {".*", "*"}:
+        candidate = os.path.join(root_abs, load_run_name)
+        if os.path.isdir(candidate):
+            return os.path.abspath(candidate)
+
+    checkpoint_arg = str(load_checkpoint).strip() if load_checkpoint is not None else ""
+    if checkpoint_arg:
+        checkpoint_path = os.path.abspath(os.path.expanduser(checkpoint_arg))
+        if os.path.isfile(checkpoint_path):
+            parent = os.path.abspath(os.path.dirname(checkpoint_path))
+            try:
+                if os.path.commonpath([root_abs, parent]) == root_abs:
+                    return parent
+            except ValueError:
+                pass
+
+    return None
+
+
 def _configure_eval_env_cfg(eval_cfg, force_deploy_reset: bool) -> None:
     """Apply play-style deterministic settings to an eval env config."""
     eval_cfg.observations.policy.enable_corruption = False
@@ -190,13 +214,32 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
     log_root_path = os.path.join("logs", "rsl_rl", agent_cfg.experiment_name)
     log_root_path = os.path.abspath(log_root_path)
     print(f"[INFO] Logging experiment in directory: {log_root_path}")
-    # specify directory for logging runs: {time-stamp}_{run_name}
-    log_dir = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-    # The Ray Tune workflow extracts experiment name using the logging line below, hence, do not change it (see PR #2346, comment-2819298849)
-    print(f"Exact experiment name requested from command line: {log_dir}")
-    if agent_cfg.run_name:
-        log_dir += f"_{agent_cfg.run_name}"
-    log_dir = os.path.join(log_root_path, log_dir)
+    resume_requested = bool(agent_cfg.resume or agent_cfg.algorithm.class_name == "Distillation")
+    resume_in_place = _parse_bool_env("LITE3_RESUME_IN_PLACE", default=True)
+    resume_log_dir = None
+    if resume_requested and resume_in_place:
+        resume_log_dir = _resolve_resume_log_dir(
+            log_root_path=log_root_path,
+            load_run=agent_cfg.load_run,
+            load_checkpoint=agent_cfg.load_checkpoint,
+        )
+
+    if resume_log_dir is not None:
+        log_dir = resume_log_dir
+        requested_name = os.path.basename(log_dir)
+        # The Ray Tune workflow extracts experiment name using the logging line below, hence, do not change it
+        # (see PR #2346, comment-2819298849).
+        print(f"Exact experiment name requested from command line: {requested_name}")
+        print(f"[INFO] Resume in-place enabled: writing checkpoints to existing run directory: {log_dir}")
+    else:
+        # specify directory for logging runs: {time-stamp}_{run_name}
+        log_dir_name = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        # The Ray Tune workflow extracts experiment name using the logging line below, hence, do not change it
+        # (see PR #2346, comment-2819298849).
+        print(f"Exact experiment name requested from command line: {log_dir_name}")
+        if agent_cfg.run_name:
+            log_dir_name += f"_{agent_cfg.run_name}"
+        log_dir = os.path.join(log_root_path, log_dir_name)
 
     # create log directory early so helper scripts can be generated
     os.makedirs(log_dir, exist_ok=True)
@@ -229,9 +272,16 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
     if isinstance(env.unwrapped, DirectMARLEnv):
         env = multi_agent_to_single_agent(env)
 
-    # save resume path before creating a new log_dir
-    if agent_cfg.resume or agent_cfg.algorithm.class_name == "Distillation":
-        resume_path = get_checkpoint_path(log_root_path, agent_cfg.load_run, agent_cfg.load_checkpoint)
+    # resolve resume checkpoint path, when resume/distillation is requested
+    if resume_requested:
+        resume_path = None
+        checkpoint_arg = str(agent_cfg.load_checkpoint) if agent_cfg.load_checkpoint is not None else ""
+        if checkpoint_arg:
+            explicit_path = os.path.expanduser(checkpoint_arg)
+            if os.path.isfile(explicit_path):
+                resume_path = os.path.abspath(explicit_path)
+        if resume_path is None:
+            resume_path = get_checkpoint_path(log_root_path, agent_cfg.load_run, agent_cfg.load_checkpoint)
 
     # wrap for video recording
     if args_cli.video:
@@ -512,13 +562,14 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
 
 
 def _write_run_scripts(log_dir: str, task: str, experiment_name: str, agent_entry_point: str) -> None:
-    """Create run_play.sh, run_resume.sh, run_evolution.sh in the run directory."""
+    """Create run helper scripts in the run directory."""
     run_dir_abs = os.path.abspath(log_dir)
     exp_name = experiment_name
     run_name = os.path.basename(run_dir_abs)
 
     run_play_path = os.path.join(run_dir_abs, "run_play.sh")
     run_resume_path = os.path.join(run_dir_abs, "run_resume.sh")
+    run_export_path = os.path.join(run_dir_abs, "run_export.sh")
     run_evolution_path = os.path.join(run_dir_abs, "run_evolution.sh")
 
     play_cmd = f"""#!/usr/bin/env bash
@@ -544,7 +595,12 @@ while [[ $# -gt 0 ]]; do
 done
 CKPT_FLAG=""
 if [[ -n "$CHECKPOINT" ]]; then
-  CKPT_FLAG="--checkpoint $CHECKPOINT"
+  if [[ "$CHECKPOINT" = /* ]]; then
+    RESOLVED_CHECKPOINT="$CHECKPOINT"
+  else
+    RESOLVED_CHECKPOINT="$THIS_DIR/$CHECKPOINT"
+  fi
+  CKPT_FLAG="--checkpoint $RESOLVED_CHECKPOINT"
 fi
 
 # Optional debug dumps for parity checks (enabled by default for quick inspection).
@@ -587,18 +643,90 @@ while [[ $# -gt 0 ]]; do
 done
 CKPT_FLAG=""
 if [[ -n "$CHECKPOINT" ]]; then
-  CKPT_FLAG="--checkpoint $CHECKPOINT"
+  if [[ "$CHECKPOINT" = /* ]]; then
+    RESOLVED_CHECKPOINT="$CHECKPOINT"
+  else
+    RESOLVED_CHECKPOINT="$THIS_DIR/$CHECKPOINT"
+  fi
+  CKPT_FLAG="--checkpoint $RESOLVED_CHECKPOINT"
 fi
 
 # Always headless for resume scripts
+export LITE3_RESUME_IN_PLACE="${{LITE3_RESUME_IN_PLACE:-1}}"
 cd "$REPO_ROOT"
-"$PYTHON_BIN" "$REPO_ROOT/scripts/reinforcement_learning/rsl_rl/train.py" \\
-  --task "{task}" \\
-  --agent "{agent_entry_point}" \\
-  --resume \\
-  --load_run "{run_name}" \\
-  $CKPT_FLAG \\
-  --headless
+    "$PYTHON_BIN" "$REPO_ROOT/scripts/reinforcement_learning/rsl_rl/train.py" \\
+      --task "{task}" \\
+      --agent "{agent_entry_point}" \\
+      --resume \\
+      --load_run "{run_name}" \\
+      $CKPT_FLAG \\
+      --headless
+"""
+
+    export_cmd = """#!/usr/bin/env bash
+set -euo pipefail
+
+# Resolve repo/log roots relative to this run directory.
+THIS_DIR="$(cd -- "$(dirname "$0")" >/dev/null 2>&1 && pwd)"
+LOGS_ROOT="$(cd "$THIS_DIR/../.." && pwd)"
+REPO_ROOT="$(cd "$LOGS_ROOT/../.." && pwd)"
+WORKSPACE_ROOT="$(cd "$REPO_ROOT/.." && pwd)"
+DEPLOY_POLICY_DIR="$WORKSPACE_ROOT/Lite3_rl_deploy/policy"
+
+PYTHON_BIN="${PYTHON_BIN:-python}"
+if [[ -x "/isaac-sim/python.sh" ]]; then
+  PYTHON_BIN="/isaac-sim/python.sh"
+fi
+
+CHECKPOINT=""
+EXPORT_PATH=""
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --checkpoint) CHECKPOINT="$2"; shift 2 ;;
+    --export_path|--export-path) EXPORT_PATH="$2"; shift 2 ;;
+    *) echo "Unknown arg: $1"; exit 1 ;;
+  esac
+done
+
+if [[ -z "$CHECKPOINT" ]]; then
+  echo "Missing required --checkpoint argument"
+  exit 1
+fi
+
+if [[ "$CHECKPOINT" = /* ]]; then
+  RESOLVED_CHECKPOINT="$CHECKPOINT"
+else
+  RESOLVED_CHECKPOINT="$THIS_DIR/$CHECKPOINT"
+fi
+
+if [[ ! -f "$RESOLVED_CHECKPOINT" ]]; then
+  echo "Checkpoint file not found: $RESOLVED_CHECKPOINT"
+  exit 1
+fi
+
+if [[ ! -d "$DEPLOY_POLICY_DIR" ]]; then
+  echo "Deploy policy directory not found: $DEPLOY_POLICY_DIR"
+  exit 1
+fi
+
+if [[ -z "$EXPORT_PATH" ]]; then
+  RESOLVED_EXPORT_PATH="$DEPLOY_POLICY_DIR/ppo/policy.onnx"
+elif [[ "$EXPORT_PATH" = /* ]]; then
+  RESOLVED_EXPORT_PATH="$EXPORT_PATH"
+else
+  RESOLVED_EXPORT_PATH="$DEPLOY_POLICY_DIR/$EXPORT_PATH"
+fi
+
+mkdir -p "$(dirname "$RESOLVED_EXPORT_PATH")"
+
+cd "$DEPLOY_POLICY_DIR"
+"$PYTHON_BIN" pt2onnx.py \\
+  --ckpt "$RESOLVED_CHECKPOINT" \\
+  --out "$RESOLVED_EXPORT_PATH" \\
+  --num-obs 117 \\
+  --history-len 40
+
+echo "[OK] Exported ONNX to: $RESOLVED_EXPORT_PATH"
 """
 
     evolution_cmd = f"""#!/usr/bin/env bash
@@ -824,6 +952,7 @@ PY
     script_pairs = [
         (run_play_path, play_cmd),
         (run_resume_path, resume_cmd),
+        (run_export_path, export_cmd),
         (run_evolution_path, evolution_cmd),
     ]
     for path, content in script_pairs:

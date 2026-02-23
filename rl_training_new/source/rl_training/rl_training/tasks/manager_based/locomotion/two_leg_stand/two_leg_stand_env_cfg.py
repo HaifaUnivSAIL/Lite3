@@ -708,9 +708,10 @@ class TwoLegStandRewardsCfg:
         func=mdp.base_height_bonus,
         weight=0.0,
         params={
-            "min_height": 0.55,
-            "max_height": 0.8,
+            "min_height": 0.45,
+            "max_height": 0.75,
             "hind_feet_sensor_cfg": SceneEntityCfg("contact_forces", body_names=["HL_FOOT", "HR_FOOT"]),
+            "front_feet_sensor_cfg": SceneEntityCfg("contact_forces", body_names=["FL_FOOT", "FR_FOOT"]),
             "asset_cfg": SceneEntityCfg("robot"),
         },
     )
@@ -841,6 +842,82 @@ class TwoLegStandRewardsCfg:
         },
     )
 
+    # === Safe/Slow/Low-Power Curriculum Rewards ===
+    two_leg_state_hold_bonus = RewTerm(
+        func=mdp.two_leg_state_hold_bonus,
+        weight=0.0,
+        params={
+            "front_feet_sensor_cfg": SceneEntityCfg("contact_forces", body_names=["FL_FOOT", "FR_FOOT"]),
+            "hind_feet_sensor_cfg": SceneEntityCfg("contact_forces", body_names=["HL_FOOT", "HR_FOOT"]),
+            "front_feet_body_cfg": SceneEntityCfg("robot", body_names=["FL_FOOT", "FR_FOOT"]),
+            "pitch_tolerance": 0.35,
+            "pitch_target": -1.22,
+            "enter_threshold": 0.80,
+            "exit_threshold": 0.70,
+            "tau_hold": 60.0,
+            "hold_cap": 1.0,
+            "asset_cfg": SceneEntityCfg("robot"),
+        },
+    )
+
+    transition_dynamics_penalty = RewTerm(
+        func=mdp.transition_dynamics_penalty,
+        weight=0.0,
+        params={
+            "front_feet_sensor_cfg": SceneEntityCfg("contact_forces", body_names=["FL_FOOT", "FR_FOOT"]),
+            "hind_feet_sensor_cfg": SceneEntityCfg("contact_forces", body_names=["HL_FOOT", "HR_FOOT"]),
+            "front_feet_body_cfg": SceneEntityCfg("robot", body_names=["FL_FOOT", "FR_FOOT"]),
+            "pitch_tolerance": 0.35,
+            "pitch_target": -1.22,
+            "enter_threshold": 0.80,
+            "exit_threshold": 0.70,
+            "hold_grace_steps": 20,
+            "activation_metric_threshold": 0.45,
+            "lin_vel_z_ref": 0.35,
+            "ang_vel_xy_ref": 2.0,
+            "dof_acc_ref": 80.0,
+            "action_rate_ref": 0.35,
+            "dyn_cap": 2.5,
+            "w_lin_z": 1.0,
+            "w_ang_xy": 1.0,
+            "w_dof_acc": 0.1,
+            "w_action_rate": 0.2,
+            "asset_cfg": SceneEntityCfg("robot"),
+        },
+    )
+
+    effort_bundle_penalty = RewTerm(
+        func=mdp.effort_bundle_penalty,
+        weight=0.0,
+        params={
+            "torque_soft_limit": 0.9,
+            "dof_vel_soft_limit": 0.9,
+            "w_torque_limits": 1.0,
+            "w_dof_vel_limits": 1.0,
+            "w_power": 0.01,
+            "w_action_magnitude": 0.05,
+            "asset_cfg": SceneEntityCfg("robot"),
+        },
+    )
+
+    fall_after_stand_penalty = RewTerm(
+        func=mdp.fall_after_stand_penalty,
+        weight=0.0,
+        params={
+            "front_feet_sensor_cfg": SceneEntityCfg("contact_forces", body_names=["FL_FOOT", "FR_FOOT"]),
+            "hind_feet_sensor_cfg": SceneEntityCfg("contact_forces", body_names=["HL_FOOT", "HR_FOOT"]),
+            "front_feet_body_cfg": SceneEntityCfg("robot", body_names=["FL_FOOT", "FR_FOOT"]),
+            "pitch_tolerance": 0.35,
+            "pitch_target": -1.22,
+            "enter_threshold": 0.80,
+            "exit_threshold": 0.70,
+            "base_fall_penalty": 1.0,
+            "hold_scale": 1.0,
+            "hold_ref_steps": 120.0,
+            "asset_cfg": SceneEntityCfg("robot"),
+        },
+    )
+
     # === Standard Penalties (from base) ===
     action_rate_l2 = RewTerm(func=base_mdp.action_rate_l2, weight=0.0)
 
@@ -894,6 +971,7 @@ class TwoLegStandTerminationsCfg:
         params={
             "sensor_cfg": SceneEntityCfg("contact_forces", body_names=["HL_FOOT", "HR_FOOT"]),
             "threshold": 1.0,
+            "min_steps_after_reset": 2,
         },
     )
 

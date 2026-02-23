@@ -8,6 +8,8 @@ This directory is the canonical home for project documentation in `rl_training_n
 
 ## Workflows
 - `workflows/experiment-workflow.md`: End-to-end train -> export -> deploy -> compare workflow.
+- `workflows/two-leg-stand-policy-to-robot.md`: Baseline training recipe, deploy stack internals, and physical robot handoff notes.
+- `workflows/two-leg-stand-safe-slow-low-power-plan.md`: Sequential plan to add state-hold, low-dynamics, and low-power safety rewards.
 
 ## Experiments
 - `experiments/history-seed-parity.md`: History-seed parity experiment, findings, and reproduction.

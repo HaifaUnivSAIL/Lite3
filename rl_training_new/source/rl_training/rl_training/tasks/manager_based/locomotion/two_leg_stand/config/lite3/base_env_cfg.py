@@ -97,8 +97,8 @@ class Lite3TwoLegStandEnvCfg(TwoLegStandEnvCfg):
 
         # Base height
         self.rewards.base_height_bonus.weight = 1.5
-        self.rewards.base_height_bonus.params["min_height"] = 0.6
-        self.rewards.base_height_bonus.params["max_height"] = 0.9
+        self.rewards.base_height_bonus.params["min_height"] = 0.45
+        self.rewards.base_height_bonus.params["max_height"] = 0.75
 
         # Collision penalty on thigh/shank (matches legged_gym penalize_contacts_on)
         self.rewards.collision.weight = -1.0
@@ -159,6 +159,7 @@ class Lite3TwoLegStandEnvCfg(TwoLegStandEnvCfg):
 
         # Update base height bonus
         self.rewards.base_height_bonus.params["hind_feet_sensor_cfg"] = hind_feet_cfg
+        self.rewards.base_height_bonus.params["front_feet_sensor_cfg"] = front_feet_cfg
 
         # Update stability metric
         self.rewards.two_leg_stand_metric.params["front_feet_sensor_cfg"] = front_feet_cfg
@@ -167,6 +168,15 @@ class Lite3TwoLegStandEnvCfg(TwoLegStandEnvCfg):
         self.rewards.two_leg_stability_safe.params["front_feet_sensor_cfg"] = front_feet_cfg
         self.rewards.two_leg_stability_safe.params["hind_feet_sensor_cfg"] = hind_feet_cfg
         self.rewards.two_leg_stability_safe.params["front_feet_body_cfg"] = front_feet_body_cfg
+        self.rewards.two_leg_state_hold_bonus.params["front_feet_sensor_cfg"] = front_feet_cfg
+        self.rewards.two_leg_state_hold_bonus.params["hind_feet_sensor_cfg"] = hind_feet_cfg
+        self.rewards.two_leg_state_hold_bonus.params["front_feet_body_cfg"] = front_feet_body_cfg
+        self.rewards.transition_dynamics_penalty.params["front_feet_sensor_cfg"] = front_feet_cfg
+        self.rewards.transition_dynamics_penalty.params["hind_feet_sensor_cfg"] = hind_feet_cfg
+        self.rewards.transition_dynamics_penalty.params["front_feet_body_cfg"] = front_feet_body_cfg
+        self.rewards.fall_after_stand_penalty.params["front_feet_sensor_cfg"] = front_feet_cfg
+        self.rewards.fall_after_stand_penalty.params["hind_feet_sensor_cfg"] = hind_feet_cfg
+        self.rewards.fall_after_stand_penalty.params["front_feet_body_cfg"] = front_feet_body_cfg
 
         # Update feet penalties
         self.rewards.feet_velocity.params["sensor_cfg"] = SceneEntityCfg(
@@ -299,6 +309,7 @@ class Lite3TwoLegStandSafeEnvCfg(Lite3TwoLegStandStillV2EnvCfg):
             params={
                 "sensor_cfg": SceneEntityCfg("contact_forces", body_names=["HL_FOOT", "HR_FOOT"]),
                 "threshold": 1.0,
+                "min_steps_after_reset": 2,
             },
         )
         self.rewards.feet_contact_forces.params["max_contact_force"] = 80.0
@@ -306,6 +317,28 @@ class Lite3TwoLegStandSafeEnvCfg(Lite3TwoLegStandStillV2EnvCfg):
         # Update termination limits to be stricter
         self.terminations.bad_orientation.params["roll_limit_rad"] = math.radians(40.0)
         self.terminations.bad_orientation.params["pitch_limit_rad"] = math.radians(90.0)
+
+
+@configclass
+class Lite3TwoLegStandSafeSlowLowPowerEnvCfg(Lite3TwoLegStandSafeEnvCfg):
+    """Isolated task scaffold for safe/slow/low-power reward development.
+
+    Keeps the existing safe curriculum behavior while disabling positive-only
+    reward clipping so negative penalties fully affect optimization.
+    """
+
+    def __post_init__(self):
+        super().__post_init__()
+        # Ensure penalty terms are not clipped at zero.
+        self.only_positive_rewards = False
+        # Use isolated exploration-first -> strict-late curriculum.
+        self.curriculum.phases.params["phases"] = mdp.get_two_leg_stand_safe_slow_low_power_phases()
+        self.curriculum.phases.params["steps_per_env"] = 24
+        self.curriculum.phases.params["front_touch_termination"] = {
+            "enabled": False,
+            "metrics": {"two_leg_stability": 0.75},
+            "log_enable": True,
+        }
 
 
 @configclass
@@ -595,8 +628,8 @@ class Lite3TwoLegStandDeployR1EnvCfg(Lite3TwoLegStandDeployAlignedEnvCfg):
             term.params["pitch_target"] = pitch_target
             term.params["pitch_tolerance"] = pitch_tolerance
 
-        self.rewards.base_height_bonus.params["min_height"] = 0.6
-        self.rewards.base_height_bonus.params["max_height"] = 0.9
+        self.rewards.base_height_bonus.params["min_height"] = 0.45
+        self.rewards.base_height_bonus.params["max_height"] = 0.75
         self.rewards.feet_contact_forces.params["max_contact_force"] = 80.0
         self.rewards.deploy_posture_gate.params["margin_deg"] = 0.5
         self.rewards.deploy_posture_gate.params["roll_limit_rad"] = math.radians(40.0)
@@ -642,3 +675,44 @@ class Lite3TwoLegStandDeployR1EnvCfg(Lite3TwoLegStandDeployAlignedEnvCfg):
         self.rewards.two_leg_stability_safe.weight = 1.0e-6
         self.rewards.deploy_posture_gate.weight = -5.0
         self.rewards.is_terminated.weight = -10.0
+
+
+@configclass
+class Lite3TwoLegStandDeployR12MimicEnvCfg(Lite3TwoLegStandDeployR1EnvCfg):
+    """Isolated baseline task that starts from the legacy deploy/r1-r2 strategy.
+
+    Notes:
+    - Intentionally keeps the current rl_training_new reward semantics (including
+      base_height_bonus behavior) as requested.
+    - Keeps default realistic history semantics via global wrappers
+      (history cleared on done/reset unless debug override is enabled).
+    """
+
+    def __post_init__(self):
+        super().__post_init__()
+
+        # Isolated baseline: deploy/r1 phases with non-safe exploration phase 0.
+        self.curriculum.phases.params["phases"] = mdp.get_two_leg_stand_deploy_r12_mimic_phases()
+        self.curriculum.phases.params["steps_per_env"] = 24
+        self.curriculum.phases.params["front_touch_termination"] = {
+            "enabled": False,
+            "metrics": {"two_leg_stability": 0.75},
+            "log_enable": True,
+        }
+
+
+@configclass
+class Lite3TwoLegStandDeploySafeV2EnvCfg(Lite3TwoLegStandDeployR1EnvCfg):
+    """Lite3 two-leg standing with deploy-safe v2 curriculum progression."""
+
+    def __post_init__(self):
+        super().__post_init__()
+
+        # Use improved safety progression curriculum.
+        self.curriculum.phases.params["phases"] = mdp.get_two_leg_stand_deploy_safe_v2_phases()
+        self.curriculum.phases.params["steps_per_env"] = 24
+        self.curriculum.phases.params["front_touch_termination"] = {
+            "enabled": False,
+            "metrics": {"two_leg_stability": 0.75},
+            "log_enable": True,
+        }

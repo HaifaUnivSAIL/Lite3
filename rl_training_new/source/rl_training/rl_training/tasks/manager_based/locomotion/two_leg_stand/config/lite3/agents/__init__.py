@@ -6,7 +6,10 @@ from .rsl_rl_ppo_cfg import (
     Lite3TwoLegStandStillPPORunnerCfg,
     Lite3TwoLegStandStillV2PPORunnerCfg,
     Lite3TwoLegStandSafePPORunnerCfg,
+    Lite3TwoLegStandSafeSlowLowPowerPPORunnerCfg,
     Lite3TwoLegStandDeployAlignedPPORunnerCfg,
     Lite3TwoLegStandDeployR1PPORunnerCfg,
+    Lite3TwoLegStandDeployR12MimicPPORunnerCfg,
+    Lite3TwoLegStandDeploySafeV2PPORunnerCfg,
     Lite3TwoLegStandRobustPPORunnerCfg,
 )

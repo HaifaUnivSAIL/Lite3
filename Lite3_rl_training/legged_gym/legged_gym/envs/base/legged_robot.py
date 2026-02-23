@@ -2221,10 +2221,10 @@ class LeggedRobot(BaseTask):
         L_hr = torch.norm(v_hr, dim=1)
         length_norm = torch.clamp((L_hl + L_hr) * 0.5 / 0.4, 0.0, 1.0)
 
-        # Vertical alignment: reward pointing downward (vz > 0), taper to zero if horizontal
+        # Vertical alignment in Z-up world: feet are below hips, so hip->foot vz is negative.
         L_stack = torch.stack((L_hl, L_hr), dim=1) + 1e-6
         vz = torch.stack((v_hl[:, 2], v_hr[:, 2]), dim=1)
-        align = torch.clamp(vz / L_stack, 0.0, 1.0).mean(dim=1)
+        align = torch.clamp((-vz) / L_stack, 0.0, 1.0).mean(dim=1)
 
         # Horizontal splay penalty: discourage very long, horizontal legs
         horiz = torch.stack((torch.norm(v_hl[:, :2], dim=1), torch.norm(v_hr[:, :2], dim=1)), dim=1).mean(dim=1)

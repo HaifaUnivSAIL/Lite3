@@ -70,6 +70,15 @@ class Lite3TwoLegStandSafePPORunnerCfg(Lite3TwoLegStandStillV2PPORunnerCfg):
 
 
 @configclass
+class Lite3TwoLegStandSafeSlowLowPowerPPORunnerCfg(Lite3TwoLegStandSafePPORunnerCfg):
+    """PPO runner configuration for isolated safe/slow/low-power training."""
+
+    def __post_init__(self):
+        super().__post_init__()
+        self.experiment_name = "two_leg_stand_safe_slow_low_power"
+
+
+@configclass
 class Lite3TwoLegStandDeployAlignedPPORunnerCfg(Lite3TwoLegStandSafePPORunnerCfg):
     """PPO runner configuration for deployment-aligned two-leg standing."""
 
@@ -97,6 +106,28 @@ class Lite3TwoLegStandDeployR1PPORunnerCfg(Lite3TwoLegStandDeployAlignedPPORunne
         # Explicitly mirror adaptation network config
         self.policy.adaptation_hidden_dims = [256, 32]
         self.policy.encoder_latent_dims = 18
+
+
+@configclass
+class Lite3TwoLegStandDeployR12MimicPPORunnerCfg(Lite3TwoLegStandDeployR1PPORunnerCfg):
+    """PPO runner for isolated deploy/r1-r2 mimic experiments."""
+
+    def __post_init__(self):
+        super().__post_init__()
+        self.experiment_name = "deploy_r12_mimic"
+        # Keep task isolated from historical r1 run naming by default.
+        self.run_name = ""
+        self.resume = False
+
+
+@configclass
+class Lite3TwoLegStandDeploySafeV2PPORunnerCfg(Lite3TwoLegStandDeployR1PPORunnerCfg):
+    """PPO runner for deploy-safe-v2 curriculum."""
+
+    def __post_init__(self):
+        super().__post_init__()
+        self.experiment_name = "two_leg_stand_deploy_safe_v2"
+        self.run_name = ""
 
 
 @configclass

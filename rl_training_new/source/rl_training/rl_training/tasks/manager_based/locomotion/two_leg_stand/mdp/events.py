@@ -434,13 +434,23 @@ def hind_feet_off(
     env: ManagerBasedEnv,
     sensor_cfg: SceneEntityCfg,
     threshold: float = 1.0,
+    min_steps_after_reset: int = 2,
 ) -> torch.Tensor:
     """Termination condition: hind feet lose contact."""
     contact_sensor: ContactSensor = env.scene.sensors[sensor_cfg.name]
     net_forces = contact_sensor.data.net_forces_w_history
     current_forces = net_forces[:, -1, sensor_cfg.body_ids]
     is_contact = torch.norm(current_forces, dim=-1) > threshold
-    return ~torch.all(is_contact, dim=1)
+    lost_contact = ~torch.all(is_contact, dim=1)
+    # Contact sensors can report transient zeros right after reset.
+    # Add a short grace window to avoid immediate length-1 episodes.
+    if min_steps_after_reset > 0 and hasattr(env, "episode_length_buf"):
+        try:
+            grace = env.episode_length_buf <= int(min_steps_after_reset)
+            lost_contact = lost_contact & (~grace)
+        except Exception:
+            pass
+    return lost_contact
 
 
 def front_touch_termination(

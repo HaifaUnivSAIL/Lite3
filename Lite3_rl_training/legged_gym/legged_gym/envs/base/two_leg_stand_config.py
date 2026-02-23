@@ -144,7 +144,7 @@ class TwoLegStandCfg(LeggedRobotCfg):
             phases = [
                 {  # Emphasize immediate front-leg lift-off
                     "name": "phase_0_legs_up_warmup",
-                    "trigger_thresh": 500,
+                    "trigger_thresh": 0,
                     "near_goal_init_prob": 0.0,
                     "reward_scales": {
                         "front_legs_up_warmup": 18.0,
@@ -156,7 +156,7 @@ class TwoLegStandCfg(LeggedRobotCfg):
                 },
                 {
                     "name": "phase_0_basic",
-                    "trigger_thresh": 1000,
+                    "trigger_thresh": 500,
                     "near_goal_init_prob": 0.0,
                     "reward_scales": {
                         "front_legs_up_warmup": 14.0,
@@ -169,7 +169,7 @@ class TwoLegStandCfg(LeggedRobotCfg):
                 },
                 {
                     "name": "phase_1_posture_alignment",
-                    "trigger_thresh": 2500,
+                    "trigger_thresh": 1000,
                     "near_goal_init_prob": 0.45,
                     "reward_scales": {
                         "front_legs_up_warmup": 14.0,
@@ -183,7 +183,7 @@ class TwoLegStandCfg(LeggedRobotCfg):
                 },
                 {
                     "name": "phase_2_fine_standing_roll_supression",
-                    "trigger_thresh": 4000,
+                    "trigger_thresh": 2500,
                     "near_goal_init_prob": 0.7,
                     "reward_scales": {
                         "front_legs_up_warmup": 14.0,
