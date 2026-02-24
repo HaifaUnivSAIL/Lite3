@@ -64,6 +64,7 @@ from .rewards import (
 from .events import (
     reset_to_near_goal_state,
     reset_to_deploy_state,
+    randomize_gravity,
     randomize_motor_strength,
     push_robots,
     bad_orientation_two_leg,

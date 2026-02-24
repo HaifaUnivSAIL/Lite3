@@ -66,7 +66,8 @@ def test_new_env_cfg_uses_safe_slow_low_power_phase_factory():
 def test_transition_dynamics_penalty_is_bounded_and_gated():
     text = REWARDS_PATH.read_text(encoding="utf-8")
     assert "activation_metric_threshold" in text
-    assert "proximity_gate = torch.clamp((metric - start_threshold) / denom, min=0.0, max=1.0)" in text
+    assert 'posture_progress = components["hind_support"] * components["orientation_gate"] * components["height_gate"]' in text
+    assert "proximity_gate = torch.clamp((posture_progress - start_threshold) / denom, min=0.0, max=1.0)" in text
     assert "dof_count = max(int(asset.data.joint_vel.shape[1]), 1)" in text
     assert "action_count = max(int(env.action_manager.action.shape[1]), 1)" in text
     assert "raw_dyn = torch.clamp(raw_dyn, max=float(dyn_cap))" in text

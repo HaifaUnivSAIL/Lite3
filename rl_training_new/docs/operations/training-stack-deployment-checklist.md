@@ -5,8 +5,7 @@ This document is the release-ready runbook for training/inference parity with co
 ## 1) Required Behavior
 
 - Default behavior: observation history is reset on episode done/reset.
-- Debug-only override: `LITE3_UNREALISTIC_HISTORY_FEED=1` (legacy leak emulation).
-- Do not use legacy override for production training or evaluation.
+- `LITE3_UNREALISTIC_HISTORY_FEED=1` is forbidden and should abort startup.
 
 ## 2) Preflight (before server run)
 
@@ -103,15 +102,15 @@ Accept run for deployment only if:
 - behavior in simulation is stable and expected;
 - compare report is archived with the run ID.
 
-## 9) Debug-Only Legacy Experiment
+## 9) Forbidden Configuration Check
 
-Use only for diagnosis:
+Do not run with:
 
 ```bash
 export LITE3_UNREALISTIC_HISTORY_FEED=1
 ```
 
-This enables legacy history carry-over and is not valid for production metrics.
+This now raises an error to prevent cross-episode observation leakage.
 
 ## 10) Push Preparation
 

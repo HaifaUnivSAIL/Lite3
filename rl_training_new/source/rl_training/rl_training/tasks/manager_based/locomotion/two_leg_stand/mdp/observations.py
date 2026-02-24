@@ -17,10 +17,11 @@ if TYPE_CHECKING:
 
 def _get_rpy_from_quat(quat: torch.Tensor) -> torch.Tensor:
     """Convert quaternion to roll, pitch, yaw (radians)."""
-    w = quat[:, 3]
-    x = quat[:, 0]
-    y = quat[:, 1]
-    z = quat[:, 2]
+    # IsaacLab root_quat_w is ordered as (w, x, y, z).
+    w = quat[:, 0]
+    x = quat[:, 1]
+    y = quat[:, 2]
+    z = quat[:, 3]
 
     sinr_cosp = 2.0 * (w * x + y * z)
     cosr_cosp = 1.0 - 2.0 * (x * x + y * y)
@@ -147,21 +148,31 @@ def _get_action_history(env: "ManagerBasedRLEnv") -> tuple[torch.Tensor, torch.T
     reset_mask = _reset_mask(env)
 
     prev_action = env.action_manager.prev_action
-    prev_prev_action = getattr(env, "_two_leg_prev_prev_action", prev_action.clone())
 
     if reset_mask is not None and reset_mask.any():
         asset: Articulation = env.scene["robot"]
         reset_actions = asset.data.joint_pos - asset.data.default_joint_pos
         prev_action = prev_action.clone()
-        prev_prev_action = prev_prev_action.clone()
         prev_action[reset_mask] = reset_actions[reset_mask]
-        prev_prev_action[reset_mask] = reset_actions[reset_mask]
 
     if last_step != step:
         prev_prev_action = getattr(env, "_two_leg_prev_action_hist", prev_action.clone())
-        env._two_leg_prev_prev_action = prev_prev_action
+        if reset_mask is not None and reset_mask.any():
+            prev_prev_action = prev_prev_action.clone()
+            prev_prev_action[reset_mask] = prev_action[reset_mask]
+        env._two_leg_prev_prev_action = prev_prev_action.clone()
         env._two_leg_prev_action_hist = prev_action.clone()
         env._two_leg_action_hist_step = step
+    else:
+        prev_prev_action = getattr(env, "_two_leg_prev_prev_action", prev_action.clone())
+        if reset_mask is not None and reset_mask.any():
+            prev_prev_action = prev_prev_action.clone()
+            prev_prev_action[reset_mask] = prev_action[reset_mask]
+            env._two_leg_prev_prev_action = prev_prev_action
+            if hasattr(env, "_two_leg_prev_action_hist"):
+                prev_hist = env._two_leg_prev_action_hist.clone()
+                prev_hist[reset_mask] = prev_action[reset_mask]
+                env._two_leg_prev_action_hist = prev_hist
 
     snapshot = getattr(env, "_two_leg_action_hist_snapshot", None)
     if snapshot is None or getattr(env, "_two_leg_action_hist_snapshot_step", None) != step:
@@ -212,6 +223,16 @@ def _to_device(tensor: torch.Tensor, device: torch.device) -> torch.Tensor:
     return tensor.to(device=device)
 
 
+def _joint_count(joint_ids, total_joints: int) -> int:
+    if joint_ids is None:
+        return int(total_joints)
+    if isinstance(joint_ids, slice):
+        return len(range(*joint_ids.indices(total_joints)))
+    if torch.is_tensor(joint_ids):
+        return int(joint_ids.numel())
+    return len(joint_ids)
+
+
 def friction_coeffs(
     env: "ManagerBasedRLEnv", repeat: int = 4
 ) -> torch.Tensor:
@@ -246,6 +267,16 @@ def external_wrench(env: "ManagerBasedRLEnv") -> torch.Tensor:
     forces = getattr(env, "push_forces", None)
     torques = getattr(env, "push_torques", None)
     if forces is None or torques is None:
+        return torch.zeros((env.scene.num_envs, 6), device=env.device)
+    # Safety guard: do not expose stale push buffers from previous steps/episodes.
+    step = getattr(env, "common_step_counter", None)
+    last_push_step = getattr(env, "_two_leg_last_push_step", None)
+    if (
+        step is None
+        or last_push_step is None
+        or int(step) < int(last_push_step)
+        or int(step) - int(last_push_step) > 1
+    ):
         return torch.zeros((env.scene.num_envs, 6), device=env.device)
     if forces.dim() == 3:
         forces = forces[:, 0, :]
@@ -307,6 +338,7 @@ def motor_strength_factors(
             return cached - 1.0
         return cached[:, asset_cfg.joint_ids] - 1.0
     asset: Articulation = env.scene[asset_cfg.name]
+    joint_dim = _joint_count(asset_cfg.joint_ids, asset.num_joints)
     effort = None
     default_effort = None
     if hasattr(asset, "data"):
@@ -319,7 +351,7 @@ def motor_strength_factors(
             if default_effort is not None:
                 break
     if effort is None or default_effort is None:
-        return torch.zeros((env.scene.num_envs, len(asset_cfg.joint_ids)), device=env.device)
+        return torch.zeros((env.scene.num_envs, joint_dim), device=env.device)
     effort = _to_device(effort, env.device)[:, asset_cfg.joint_ids]
     default_effort = _to_device(default_effort, env.device)[:, asset_cfg.joint_ids]
     ratio = effort / default_effort.clamp(min=1.0e-6)
@@ -331,12 +363,13 @@ def kp_factors(
 ) -> torch.Tensor:
     """Kp factors (current / default stiffness)."""
     asset: Articulation = env.scene[asset_cfg.name]
+    joint_dim = _joint_count(asset_cfg.joint_ids, asset.num_joints)
     if not hasattr(asset, "data"):
-        return torch.zeros((env.scene.num_envs, len(asset_cfg.joint_ids)), device=env.device)
+        return torch.zeros((env.scene.num_envs, joint_dim), device=env.device)
     stiffness = getattr(asset.data, "joint_stiffness", None)
     default_stiffness = getattr(asset.data, "default_joint_stiffness", None)
     if stiffness is None or default_stiffness is None:
-        return torch.zeros((env.scene.num_envs, len(asset_cfg.joint_ids)), device=env.device)
+        return torch.zeros((env.scene.num_envs, joint_dim), device=env.device)
     stiffness = _to_device(stiffness, env.device)[:, asset_cfg.joint_ids]
     default_stiffness = _to_device(default_stiffness, env.device)[:, asset_cfg.joint_ids]
     ratio = stiffness / default_stiffness.clamp(min=1.0e-6)
@@ -356,12 +389,13 @@ def kd_factors(
 ) -> torch.Tensor:
     """Kd factors (current / default damping)."""
     asset: Articulation = env.scene[asset_cfg.name]
+    joint_dim = _joint_count(asset_cfg.joint_ids, asset.num_joints)
     if not hasattr(asset, "data"):
-        return torch.zeros((env.scene.num_envs, len(asset_cfg.joint_ids)), device=env.device)
+        return torch.zeros((env.scene.num_envs, joint_dim), device=env.device)
     damping = getattr(asset.data, "joint_damping", None)
     default_damping = getattr(asset.data, "default_joint_damping", None)
     if damping is None or default_damping is None:
-        return torch.zeros((env.scene.num_envs, len(asset_cfg.joint_ids)), device=env.device)
+        return torch.zeros((env.scene.num_envs, joint_dim), device=env.device)
     damping = _to_device(damping, env.device)[:, asset_cfg.joint_ids]
     default_damping = _to_device(default_damping, env.device)[:, asset_cfg.joint_ids]
     ratio = damping / default_damping.clamp(min=1.0e-6)

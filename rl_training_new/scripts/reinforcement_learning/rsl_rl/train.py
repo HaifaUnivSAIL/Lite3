@@ -117,9 +117,15 @@ def _parse_bool_env(name: str, default: bool = False) -> bool:
 
 
 def _history_mode_label() -> str:
-    if _parse_bool_env("LITE3_UNREALISTIC_HISTORY_FEED", default=False):
-        return "unrealistic_history_feed"
     return "default_reset_on_done"
+
+
+def _assert_no_unrealistic_history_feed() -> None:
+    if _parse_bool_env("LITE3_UNREALISTIC_HISTORY_FEED", default=False):
+        raise RuntimeError(
+            "LITE3_UNREALISTIC_HISTORY_FEED=1 is not supported: cross-episode history leakage is forbidden. "
+            "Unset this variable and rerun training."
+        )
 
 
 def _resolve_resume_log_dir(log_root_path: str, load_run, load_checkpoint) -> str | None:
@@ -188,6 +194,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
     """Train with RSL-RL agent."""
     # Ensure logs are world-accessible by default.
     os.umask(0o000)
+    _assert_no_unrealistic_history_feed()
     # override configurations with non-hydra CLI arguments
     agent_cfg = cli_args.update_rsl_rl_cfg(agent_cfg, args_cli)
     env_cfg.scene.num_envs = args_cli.num_envs if args_cli.num_envs is not None else env_cfg.scene.num_envs
@@ -304,10 +311,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
         termination_reward_weight=term_weight,
     )
     history_mode = _history_mode_label()
-    if history_mode == "unrealistic_history_feed":
-        print("[WARN] History mode: unrealistic_history_feed (debug-only legacy behavior).")
-    else:
-        print("[INFO] History mode: default_reset_on_done")
+    print("[INFO] History mode: default_reset_on_done")
 
     # create runner from rsl-rl
     runner = OnPolicyRunner(env, agent_cfg.to_dict(), log_dir=log_dir, device=agent_cfg.device)

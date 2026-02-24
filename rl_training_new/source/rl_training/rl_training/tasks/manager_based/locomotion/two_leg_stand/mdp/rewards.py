@@ -1233,11 +1233,11 @@ def transition_dynamics_penalty(
     """Penalty for aggressive transition dynamics while entering two-leg stand.
 
     Notes:
-    - The term is activation-gated by the two-leg metric proximity so early broad
-      exploration is not suppressed.
+    - The term is activation-gated by posture progress (support + orientation +
+      height) so early broad exploration is not suppressed.
     - Each component is normalized and clamped to avoid large-magnitude spikes.
     """
-    metric = two_leg_stand_metric(
+    components = _two_leg_stand_metric_components(
         env=env,
         front_feet_sensor_cfg=front_feet_sensor_cfg,
         hind_feet_sensor_cfg=hind_feet_sensor_cfg,
@@ -1246,6 +1246,7 @@ def transition_dynamics_penalty(
         pitch_target=pitch_target,
         asset_cfg=asset_cfg,
     )
+    metric = components["metric"]
     _, hold_steps, ever_reached = _update_two_leg_state_tracker(
         env=env,
         metric=metric,
@@ -1257,9 +1258,12 @@ def transition_dynamics_penalty(
     else:
         active_gate = (~ever_reached).float()
 
-    start_threshold = min(float(activation_metric_threshold), float(enter_threshold) - 1e-3)
-    denom = max(float(enter_threshold) - start_threshold, 1e-6)
-    proximity_gate = torch.clamp((metric - start_threshold) / denom, min=0.0, max=1.0)
+    # Use posture-only progress (without lin/ang/tapping gates) so high dynamics
+    # does not zero-out this penalty's own activation gate.
+    posture_progress = components["hind_support"] * components["orientation_gate"] * components["height_gate"]
+    start_threshold = min(max(float(activation_metric_threshold), 0.0), 0.95)
+    denom = max(1.0 - start_threshold, 1e-6)
+    proximity_gate = torch.clamp((posture_progress - start_threshold) / denom, min=0.0, max=1.0)
 
     asset: Articulation = env.scene[asset_cfg.name]
     dof_count = max(int(asset.data.joint_vel.shape[1]), 1)

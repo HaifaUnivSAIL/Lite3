@@ -35,10 +35,10 @@ We've released the following tutorials for training and deploying a reinforcemen
 
 ## History Reset Semantics (Current Default)
 
-The default behavior is to clear observation history on episode reset/done events. This is the production-safe behavior and the expected training/deploy alignment.
+Observation history is always cleared on episode reset/done events. This is the production-safe behavior and the expected training/deploy alignment.
 
-- Default mode (recommended): leave `LITE3_UNREALISTIC_HISTORY_FEED` unset (or `0`).
-- Debug-only legacy mode: set `LITE3_UNREALISTIC_HISTORY_FEED=1` to preserve history across done resets.
+- Required mode: keep `LITE3_UNREALISTIC_HISTORY_FEED` unset (or `0`).
+- Safety guard: setting `LITE3_UNREALISTIC_HISTORY_FEED=1` now raises an error and aborts run startup.
 
 ## Contribution 
 

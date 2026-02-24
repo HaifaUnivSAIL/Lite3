@@ -2,6 +2,8 @@
 
 This is the exact, **container‑side** workflow used in this session to train, export, run deploy, dump debug data, and compare training vs deploy.
 
+For the proven legacy UDP sim-to-sim path (default timing, reproducible runbook), see `legacy-sim2sim-working-flow.md`.
+
 ## 0) Conventions / Paths Used
 
 - Workspace root (inside container): `/workspace`

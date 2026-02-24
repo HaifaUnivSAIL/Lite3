@@ -126,19 +126,12 @@ def test_rsl_compat_default_clears_history_on_done(monkeypatch):
     assert torch.count_nonzero(hist[1]).item() == 0
 
 
-def test_rsl_compat_legacy_mode_preserves_history_on_done(monkeypatch):
+def test_rsl_compat_rejects_legacy_history_mode(monkeypatch):
     monkeypatch.setenv("LITE3_UNREALISTIC_HISTORY_FEED", "1")
 
     env = _DummyCompatEnv()
-    env.set_done_for_step(1, torch.tensor([False, True]))
-    wrapper = RslRlCompatWrapper(env, obs_history_length=2)
-
-    reset_obs = wrapper.reset()["obs"].clone()
-    out, _, _, _ = wrapper.step(torch.zeros((env.num_envs, env.num_actions), dtype=torch.float32))
-    step_obs = out["obs"].clone()
-    hist = out["obs_history"]
-
-    assert torch.allclose(hist[1], _hist_two_frames(reset_obs[1], step_obs[1]))
+    with pytest.raises(RuntimeError, match="cross-episode history leakage"):
+        RslRlCompatWrapper(env, obs_history_length=2)
 
 
 def test_observation_wrapper_default_clears_history_on_done(monkeypatch):
@@ -158,16 +151,9 @@ def test_observation_wrapper_default_clears_history_on_done(monkeypatch):
     assert torch.count_nonzero(hist[1]).item() == 0
 
 
-def test_observation_wrapper_legacy_mode_preserves_history_on_done(monkeypatch):
+def test_observation_wrapper_rejects_legacy_history_mode(monkeypatch):
     monkeypatch.setenv("LITE3_UNREALISTIC_HISTORY_FEED", "1")
 
     env = _DummyObsEnv()
-    env.set_done_for_step(1, torch.tensor([False, True]))
-    wrapper = ObservationHistoryWrapper(env, obs_history_length=2, obs_key="obs")
-
-    wrapper.reset()
-    obs1, _, _, _, _ = wrapper.step(torch.zeros((env.num_envs, 1), dtype=torch.float32))
-    step_obs = obs1["obs"].clone()
-    hist = obs1["obs_history"]
-
-    assert torch.allclose(hist[1], _hist_zero_then_obs(step_obs[1]))
+    with pytest.raises(RuntimeError, match="cross-episode history leakage"):
+        ObservationHistoryWrapper(env, obs_history_length=2, obs_key="obs")

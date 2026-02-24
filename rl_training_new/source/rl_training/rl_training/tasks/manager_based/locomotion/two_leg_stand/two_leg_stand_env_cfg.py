@@ -430,6 +430,15 @@ class TwoLegStandEventCfg:
         },
     )
 
+    randomize_gravity = EventTerm(
+        func=mdp.randomize_gravity,
+        mode="startup",
+        params={
+            "gravity_z_range": (-9.81, -9.81),
+            "gravity_xy_range": (0.0, 0.0),
+        },
+    )
+
     reset_to_near_goal = EventTerm(
         func=mdp.reset_to_near_goal_state,
         mode="reset",
@@ -872,7 +881,7 @@ class TwoLegStandRewardsCfg:
             "enter_threshold": 0.80,
             "exit_threshold": 0.70,
             "hold_grace_steps": 20,
-            "activation_metric_threshold": 0.45,
+            "activation_metric_threshold": 0.20,
             "lin_vel_z_ref": 0.35,
             "ang_vel_xy_ref": 2.0,
             "dof_acc_ref": 80.0,

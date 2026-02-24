@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import math
+import os
 
 from isaaclab.managers import SceneEntityCfg
 from isaaclab.managers import TerminationTermCfg as DoneTerm
@@ -19,6 +20,13 @@ from rl_training.tasks.manager_based.locomotion.two_leg_stand import (
     TwoLegStandEventCfg,
     mdp,
 )
+
+
+def _parse_bool_env(name: str, default: bool = False) -> bool:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "y", "on"}
 
 
 @configclass
@@ -342,6 +350,67 @@ class Lite3TwoLegStandSafeSlowLowPowerEnvCfg(Lite3TwoLegStandSafeEnvCfg):
 
 
 @configclass
+class Lite3TwoLegStandSafeSlowLowPowerDomainRandEnvCfg(Lite3TwoLegStandSafeSlowLowPowerEnvCfg):
+    """Safe/slow/low-power task with robot DR by default and optional environment DR.
+
+    Environment DR is enabled only when ``LITE3_ENABLE_ENV_DOMAIN_RANDOMIZATION=1``.
+    """
+
+    enable_environment_randomization: bool = False
+
+    def __post_init__(self):
+        super().__post_init__()
+
+        # Keep penalty-sensitive optimization path active.
+        self.only_positive_rewards = False
+
+        # Robot-side DR (default ON): model mismatch from actuator/structure drift.
+        self.events.randomize_rigid_body_mass.params["mass_distribution_params"] = (-2.0, 4.0)
+        self.events.randomize_com_positions.params["com_range"] = {
+            "x": (-0.08, 0.04),
+            "y": (-0.05, 0.05),
+            "z": (-0.05, 0.05),
+        }
+        self.events.randomize_actuator_gains.mode = "reset"
+        self.events.randomize_actuator_gains.params["stiffness_distribution_params"] = (0.65, 1.35)
+        self.events.randomize_actuator_gains.params["damping_distribution_params"] = (0.65, 1.35)
+        self.events.randomize_motor_strength.mode = "reset"
+        self.events.randomize_motor_strength.params["strength_range"] = (0.6, 1.4)
+        self.events.randomize_motor_strength.params["apply_to_gains"] = True
+
+        # Keep safe/slow curriculum intact.
+        self.curriculum.phases.params["phases"] = mdp.get_two_leg_stand_safe_slow_low_power_phases()
+        self.curriculum.phases.params["steps_per_env"] = 24
+        self.curriculum.phases.params["front_touch_termination"] = {
+            "enabled": False,
+            "metrics": {"two_leg_stability": 0.75},
+            "log_enable": True,
+        }
+
+        self.enable_environment_randomization = _parse_bool_env(
+            "LITE3_ENABLE_ENV_DOMAIN_RANDOMIZATION",
+            default=bool(self.enable_environment_randomization),
+        )
+
+        if self.enable_environment_randomization:
+            # Environment-side DR (optional): contact, gravity and disturbances.
+            self.events.randomize_rigid_body_material.params["static_friction_range"] = (0.05, 1.6)
+            self.events.randomize_rigid_body_material.params["dynamic_friction_range"] = (0.05, 1.4)
+            self.events.randomize_rigid_body_material.params["restitution_range"] = (0.0, 0.6)
+            self.events.randomize_gravity.params["gravity_z_range"] = (-10.4, -9.2)
+            self.events.randomize_gravity.params["gravity_xy_range"] = (-0.35, 0.35)
+            self.events.randomize_push_robot.interval_range_s = (3.0, 6.0)
+            self.events.randomize_push_robot.params["max_force"] = 24.0
+            self.events.randomize_push_robot.params["max_torque"] = 14.0
+            self.events.randomize_push_robot.params["max_vel_xy"] = 1.0
+        else:
+            # Default mode requested: robot DR only.
+            self.events.randomize_rigid_body_material = None
+            self.events.randomize_gravity = None
+            self.events.randomize_push_robot = None
+
+
+@configclass
 class Lite3TwoLegStandRobustEnvCfg(Lite3TwoLegStandSafeEnvCfg):
     """Lite3 two-leg standing with strong randomization and perturbations."""
 
@@ -476,6 +545,7 @@ class Lite3TwoLegStandDeployAlignedEnvCfg(Lite3TwoLegStandSafeEnvCfg):
         self.events.randomize_com_positions = None
         self.events.randomize_actuator_gains = None
         self.events.randomize_motor_strength = None
+        self.events.randomize_gravity = None
         self.events.randomize_push_robot = None
         self.events.reset_to_near_goal.params["near_goal_prob"] = 0.0
         self.observations.policy.enable_corruption = False
@@ -600,6 +670,7 @@ class Lite3TwoLegStandDeployR1EnvCfg(Lite3TwoLegStandDeployAlignedEnvCfg):
         self.events.randomize_com_positions = None
         self.events.randomize_actuator_gains = None
         self.events.randomize_motor_strength = None
+        self.events.randomize_gravity = None
         self.events.randomize_push_robot = None
         self.observations.policy.enable_corruption = False
 

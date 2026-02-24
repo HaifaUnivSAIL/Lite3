@@ -40,6 +40,123 @@ def _get_attr_first(obj, names: tuple[str, ...]):
     return None
 
 
+def _expand_env_dim(value: torch.Tensor | None, num_envs: int) -> torch.Tensor | None:
+    if value is None:
+        return None
+    if value.dim() == 1:
+        return value.unsqueeze(0).repeat(num_envs, 1)
+    return value
+
+
+def _get_or_cache_default_tensor(
+    env: "ManagerBasedEnv",
+    cache_name: str,
+    current: torch.Tensor,
+    explicit_default: torch.Tensor | None,
+) -> torch.Tensor:
+    if explicit_default is not None:
+        return explicit_default
+    cached = getattr(env, cache_name, None)
+    if cached is None or cached.shape != current.shape or cached.device != current.device:
+        cached = current.clone()
+        setattr(env, cache_name, cached)
+    return cached
+
+
+def _clear_push_buffers(env: "ManagerBasedEnv", env_ids: torch.Tensor | None = None) -> None:
+    """Zero cached push buffers (all envs or selected env_ids)."""
+    push_forces = getattr(env, "push_forces", None)
+    push_torques = getattr(env, "push_torques", None)
+    if push_forces is None or push_torques is None:
+        return
+    if env_ids is None:
+        push_forces.zero_()
+        push_torques.zero_()
+        return
+    if env_ids.numel() == 0:
+        return
+    push_forces[env_ids] = 0.0
+    push_torques[env_ids] = 0.0
+
+
+def randomize_gravity(
+    env: "ManagerBasedEnv",
+    env_ids: torch.Tensor | None,
+    gravity_z_range: tuple[float, float] = (-9.81, -9.81),
+    gravity_xy_range: tuple[float, float] = (0.0, 0.0),
+) -> None:
+    """Randomize world gravity vector.
+
+    Notes:
+    - Gravity is a scene-global property (not per-env), so ``env_ids`` is used only
+      as a trigger guard for event manager compatibility.
+    - Function is defensive across IsaacLab/PhysX API variants.
+    """
+    env_ids = _resolve_env_ids(env, env_ids)
+    if env_ids.numel() == 0:
+        return
+
+    gx = float(torch.empty(1, device=env.device).uniform_(float(gravity_xy_range[0]), float(gravity_xy_range[1])).item())
+    gy = float(torch.empty(1, device=env.device).uniform_(float(gravity_xy_range[0]), float(gravity_xy_range[1])).item())
+    gz = float(torch.empty(1, device=env.device).uniform_(float(gravity_z_range[0]), float(gravity_z_range[1])).item())
+    gravity_vec = torch.tensor([gx, gy, gz], device=env.device, dtype=torch.float32)
+
+    sim = getattr(env, "sim", None)
+    applied = False
+    if sim is not None:
+        for fn_name in ("set_gravity", "set_physics_scene_gravity"):
+            fn = getattr(sim, fn_name, None)
+            if fn is None:
+                continue
+            try:
+                fn((gx, gy, gz))
+                applied = True
+                break
+            except TypeError:
+                try:
+                    fn(gx, gy, gz)
+                    applied = True
+                    break
+                except Exception:
+                    continue
+            except Exception:
+                continue
+
+        if not applied:
+            physics_view = getattr(sim, "physics_sim_view", None)
+            if physics_view is None:
+                physics_view = getattr(sim, "_physics_sim_view", None)
+            if physics_view is not None:
+                fn = getattr(physics_view, "set_gravity", None)
+                if fn is not None:
+                    try:
+                        fn((gx, gy, gz))
+                        applied = True
+                    except TypeError:
+                        try:
+                            fn(gx, gy, gz)
+                            applied = True
+                        except Exception:
+                            pass
+                    except Exception:
+                        pass
+
+        cfg = getattr(sim, "cfg", None)
+        if cfg is not None and hasattr(cfg, "gravity"):
+            try:
+                gravity_cfg = getattr(cfg, "gravity")
+                if hasattr(gravity_cfg, "x") and hasattr(gravity_cfg, "y") and hasattr(gravity_cfg, "z"):
+                    gravity_cfg.x = gx
+                    gravity_cfg.y = gy
+                    gravity_cfg.z = gz
+                else:
+                    cfg.gravity = (gx, gy, gz)
+            except Exception:
+                pass
+
+    env._two_leg_gravity_w = gravity_vec
+
+
 def randomize_motor_strength(
     env: "ManagerBasedEnv",
     env_ids: torch.Tensor | None,
@@ -96,12 +213,14 @@ def randomize_motor_strength(
     )
 
     if effort is not None:
-        if effort.dim() == 1:
-            effort = effort.unsqueeze(0).repeat(env.scene.num_envs, 1)
-        if default_effort is None:
-            default_effort = effort.clone()
-        elif default_effort.dim() == 1:
-            default_effort = default_effort.unsqueeze(0).repeat(env.scene.num_envs, 1)
+        effort = _expand_env_dim(effort, env.scene.num_envs)
+        default_effort = _expand_env_dim(default_effort, env.scene.num_envs)
+        default_effort = _get_or_cache_default_tensor(
+            env,
+            "_motor_default_effort_limits",
+            effort,
+            default_effort,
+        )
         scaled = default_effort[env_ids[:, None], joint_ids] * factors.to(default_effort.dtype)
         effort[env_ids[:, None], joint_ids] = scaled
         for name in (
@@ -120,17 +239,33 @@ def randomize_motor_strength(
     damping = getattr(asset.data, "joint_damping", None)
 
     if stiffness is not None:
-        if stiffness.dim() == 1:
-            stiffness = stiffness.unsqueeze(0).repeat(env.scene.num_envs, 1)
-        base_stiffness = stiffness
+        stiffness = _expand_env_dim(stiffness, env.scene.num_envs)
+        default_stiffness = _expand_env_dim(
+            getattr(asset.data, "default_joint_stiffness", None),
+            env.scene.num_envs,
+        )
+        base_stiffness = _get_or_cache_default_tensor(
+            env,
+            "_motor_default_joint_stiffness",
+            stiffness,
+            default_stiffness,
+        )
         stiffness[env_ids[:, None], joint_ids] = (
             base_stiffness[env_ids[:, None], joint_ids] * factors.to(base_stiffness.dtype)
         )
 
     if damping is not None:
-        if damping.dim() == 1:
-            damping = damping.unsqueeze(0).repeat(env.scene.num_envs, 1)
-        base_damping = damping
+        damping = _expand_env_dim(damping, env.scene.num_envs)
+        default_damping = _expand_env_dim(
+            getattr(asset.data, "default_joint_damping", None),
+            env.scene.num_envs,
+        )
+        base_damping = _get_or_cache_default_tensor(
+            env,
+            "_motor_default_joint_damping",
+            damping,
+            default_damping,
+        )
         damping[env_ids[:, None], joint_ids] = (
             base_damping[env_ids[:, None], joint_ids] * factors.to(base_damping.dtype)
         )
@@ -171,6 +306,7 @@ def push_robots(
 
     env.push_forces[env_ids[:, None], body_ids] = forces
     env.push_torques[env_ids[:, None], body_ids] = torques
+    env._two_leg_last_push_step = getattr(env, "common_step_counter", None)
 
     applied = False
     view = getattr(asset, "root_physx_view", None)
@@ -227,6 +363,7 @@ def reset_to_near_goal_state(
     """
     if len(env_ids) == 0:
         return
+    _clear_push_buffers(env, env_ids)
 
     asset: Articulation = env.scene[asset_cfg.name]
 
@@ -242,12 +379,6 @@ def reset_to_near_goal_state(
         [math.radians(r) for r in goal_rpy_deg],
         device=env.device, dtype=torch.float32
     )
-    goal_quat = quat_from_euler_xyz(
-        rpy_rad[0].unsqueeze(0),
-        rpy_rad[1].unsqueeze(0),
-        rpy_rad[2].unsqueeze(0)
-    ).squeeze(0)  # (4,)
-
     # Apply position with noise
     pos = torch.tensor(goal_pos, device=env.device, dtype=torch.float32)
     pos_with_noise = pos.unsqueeze(0).repeat(len(near_goal_ids), 1)
@@ -334,6 +465,7 @@ def reset_to_deploy_state(
     """
     if len(env_ids) == 0:
         return
+    _clear_push_buffers(env, env_ids)
 
     asset: Articulation = env.scene[asset_cfg.name]
 

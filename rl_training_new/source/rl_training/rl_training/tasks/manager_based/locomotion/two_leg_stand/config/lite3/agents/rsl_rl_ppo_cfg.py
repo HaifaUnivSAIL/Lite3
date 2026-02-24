@@ -79,6 +79,16 @@ class Lite3TwoLegStandSafeSlowLowPowerPPORunnerCfg(Lite3TwoLegStandSafePPORunner
 
 
 @configclass
+class Lite3TwoLegStandSafeSlowLowPowerDomainRandPPORunnerCfg(Lite3TwoLegStandSafeSlowLowPowerPPORunnerCfg):
+    """PPO runner for safe/slow/low-power with domain randomization."""
+
+    def __post_init__(self):
+        super().__post_init__()
+        self.experiment_name = "two_leg_stand_safe_slow_low_power_domain_rand"
+        self.max_iterations = 20000
+
+
+@configclass
 class Lite3TwoLegStandDeployAlignedPPORunnerCfg(Lite3TwoLegStandSafePPORunnerCfg):
     """PPO runner configuration for deployment-aligned two-leg standing."""
 

@@ -14,10 +14,12 @@ Isaac Lab stack (ManagerBasedRLEnv, registered in rl_training tasks):
 - TwoLegStandStill-Deeprobotics-Lite3-v0
 - TwoLegStandStillV2-Deeprobotics-Lite3-v0
 - TwoLegStandSafe-Deeprobotics-Lite3-v0
+- TwoLegStandSafeSlowLowPower-Deeprobotics-Lite3-v0
+- TwoLegStandSafeSlowLowPowerDomainRand-Deeprobotics-Lite3-v0
 - TwoLegStandRobust-Deeprobotics-Lite3-v0
 - TwoLegStandDeployAligned-Deeprobotics-Lite3-v0
 - TwoLegStandDeployR1-Deeprobotics-Lite3-v0
-- Legacy aliases: lite3_two_leg_stand, lite3_two_leg_stand_still, lite3_two_leg_stand_still_v2, lite3_two_leg_stand_still_safe, lite3_two_leg_stand_robust, lite3_two_leg_stand_deploy_aligned
+- Legacy aliases: lite3_two_leg_stand, lite3_two_leg_stand_still, lite3_two_leg_stand_still_v2, lite3_two_leg_stand_still_safe, lite3_two_leg_stand_safe_slow_low_power, lite3_two_leg_stand_safe_slow_low_power_domain_rand, lite3_two_leg_stand_robust, lite3_two_leg_stand_deploy_aligned
 - Legacy alias (deploy/r1): lite3_two_leg_stand_deploy_r1
 - Compatibility alias: two_leg_stand_robust
 
@@ -58,6 +60,25 @@ python scripts/reinforcement_learning/rsl_rl/train.py \
 python scripts/reinforcement_learning/rsl_rl/train.py \
   --task=TwoLegStandRobust-Deeprobotics-Lite3-v0 \
   --run_name robust_rand_v1 \
+  --headless
+```
+
+### Train (safe/slow/low-power with robot DR default)
+
+```bash
+python scripts/reinforcement_learning/rsl_rl/train.py \
+  --task=TwoLegStandSafeSlowLowPowerDomainRand-Deeprobotics-Lite3-v0 \
+  --run_name sslp_robot_dr_v1 \
+  --headless
+```
+
+Enable environment DR bundle (friction/gravity/push) explicitly:
+
+```bash
+LITE3_ENABLE_ENV_DOMAIN_RANDOMIZATION=1 \
+python scripts/reinforcement_learning/rsl_rl/train.py \
+  --task=TwoLegStandSafeSlowLowPowerDomainRand-Deeprobotics-Lite3-v0 \
+  --run_name sslp_robot_env_dr_v1 \
   --headless
 ```
 
@@ -179,20 +200,10 @@ Each dump writes:
 
 ### History Semantics (Default and Debug)
 
-By default, observation history is reset on episode resets/done events. This is the required production behavior for train/play parity with deploy.
+Observation history is reset on episode resets/done events. This is required for train/play parity with deploy.
 
-- Default (production): keep `LITE3_UNREALISTIC_HISTORY_FEED` unset (or `0`).
-- Debug-only legacy mode: set `LITE3_UNREALISTIC_HISTORY_FEED=1` to preserve history across done resets.
-
-Example (debug only):
-
-```bash
-LITE3_UNREALISTIC_HISTORY_FEED=1 \
-python scripts/reinforcement_learning/rsl_rl/play.py \
-  --task=TwoLegStand-Deeprobotics-Lite3-v0 \
-  --load_run <run_folder> \
-  --checkpoint <model_XXXX.pt>
-```
+- Required: keep `LITE3_UNREALISTIC_HISTORY_FEED` unset (or `0`).
+- Forbidden: `LITE3_UNREALISTIC_HISTORY_FEED=1` now aborts startup to prevent episode leakage.
 
 ## Stack B: Legacy legged_gym
 

@@ -21,8 +21,14 @@ def _parse_bool_env(name: str, default: bool = False) -> bool:
 
 
 def _is_unrealistic_history_feed_enabled() -> bool:
-    """Debug-only legacy mode: keep observation history across episode done/reset."""
-    return _parse_bool_env("LITE3_UNREALISTIC_HISTORY_FEED", default=False)
+    """Legacy leak mode is forbidden in production training."""
+    enabled = _parse_bool_env("LITE3_UNREALISTIC_HISTORY_FEED", default=False)
+    if enabled:
+        raise RuntimeError(
+            "LITE3_UNREALISTIC_HISTORY_FEED=1 is not supported: cross-episode history leakage is forbidden. "
+            "Unset this variable to run with reset-on-done history semantics."
+        )
+    return False
 
 
 class OnlyPositiveRewardsWrapper(gym.Wrapper):
@@ -61,13 +67,8 @@ class ObservationHistoryWrapper(gym.Wrapper):
         super().__init__(env)
         self.obs_history_length = int(obs_history_length)
         self.obs_key = obs_key
-        self.unrealistic_history_feed = _is_unrealistic_history_feed_enabled()
-        self.clear_history_on_done = not self.unrealistic_history_feed
-        if self.unrealistic_history_feed:
-            print(
-                "[ObsHistoryWrapper] LITE3_UNREALISTIC_HISTORY_FEED=1: "
-                "preserving history across done resets (debug-only legacy mode)."
-            )
+        _is_unrealistic_history_feed_enabled()
+        self.clear_history_on_done = True
         self.num_obs: int | None = None
         self.num_obs_history: int | None = None
         self.obs_history = None
@@ -203,13 +204,8 @@ class RslRlCompatWrapper:
 
         self.obs_history = None
         self._last_obs_dict = None
-        self.unrealistic_history_feed = _is_unrealistic_history_feed_enabled()
-        self.clear_history_on_done = not self.unrealistic_history_feed
-        if self.unrealistic_history_feed:
-            print(
-                "[RslRlCompat] LITE3_UNREALISTIC_HISTORY_FEED=1: "
-                "preserving history across done resets (debug-only legacy mode)."
-            )
+        _is_unrealistic_history_feed_enabled()
+        self.clear_history_on_done = True
 
         # Prime buffers to infer dimensions.
         obs_dict = self._ensure_obs_dict(self._get_initial_obs())

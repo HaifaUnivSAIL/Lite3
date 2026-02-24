@@ -160,9 +160,15 @@ def _parse_bool_env(name: str, default: bool = False) -> bool:
 
 
 def _history_mode_label() -> str:
-    if _parse_bool_env("LITE3_UNREALISTIC_HISTORY_FEED", default=False):
-        return "unrealistic_history_feed"
     return "default_reset_on_done"
+
+
+def _assert_no_unrealistic_history_feed() -> None:
+    if _parse_bool_env("LITE3_UNREALISTIC_HISTORY_FEED", default=False):
+        raise RuntimeError(
+            "LITE3_UNREALISTIC_HISTORY_FEED=1 is not supported: cross-episode history leakage is forbidden. "
+            "Unset this variable and rerun play."
+        )
 
 
 def _to_cpu_numpy(value):
@@ -337,6 +343,7 @@ def _clear_two_leg_history_caches(env) -> int:
 @hydra_task_config(args_cli.task, args_cli.agent)
 def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agent_cfg: RslRlOnPolicyRunnerCfg):
     """Play with RSL-RL agent."""
+    _assert_no_unrealistic_history_feed()
     task_name = args_cli.task.split(":")[-1]
     # override configurations with non-hydra CLI arguments
     agent_cfg = cli_args.update_rsl_rl_cfg(agent_cfg, args_cli)
@@ -454,10 +461,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
         termination_reward_weight=term_weight,
     )
     history_mode = _history_mode_label()
-    if history_mode == "unrealistic_history_feed":
-        print("[WARN] History mode: unrealistic_history_feed (debug-only legacy behavior).")
-    else:
-        print("[INFO] History mode: default_reset_on_done")
+    print("[INFO] History mode: default_reset_on_done")
 
     print(f"[INFO]: Loading model checkpoint from: {resume_path}")
     # load previously trained model

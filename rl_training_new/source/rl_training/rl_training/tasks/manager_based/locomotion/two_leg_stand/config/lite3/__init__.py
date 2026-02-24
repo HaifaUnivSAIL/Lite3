@@ -12,6 +12,7 @@ from .base_env_cfg import (
     Lite3TwoLegStandStillV2EnvCfg,
     Lite3TwoLegStandSafeEnvCfg,
     Lite3TwoLegStandSafeSlowLowPowerEnvCfg,
+    Lite3TwoLegStandSafeSlowLowPowerDomainRandEnvCfg,
     Lite3TwoLegStandRobustEnvCfg,
     Lite3TwoLegStandDeployAlignedEnvCfg,
     Lite3TwoLegStandDeployR1EnvCfg,
@@ -75,6 +76,17 @@ gym.register(
     kwargs={
         "env_cfg_entry_point": f"{__name__}.base_env_cfg:Lite3TwoLegStandSafeSlowLowPowerEnvCfg",
         "rsl_rl_cfg_entry_point": f"{agents.__name__}.rsl_rl_ppo_cfg:Lite3TwoLegStandSafeSlowLowPowerPPORunnerCfg",
+    },
+)
+
+# Two-leg standing with safe/slow/low-power objective and split domain randomization.
+gym.register(
+    id="TwoLegStandSafeSlowLowPowerDomainRand-Deeprobotics-Lite3-v0",
+    entry_point="isaaclab.envs:ManagerBasedRLEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": f"{__name__}.base_env_cfg:Lite3TwoLegStandSafeSlowLowPowerDomainRandEnvCfg",
+        "rsl_rl_cfg_entry_point": f"{agents.__name__}.rsl_rl_ppo_cfg:Lite3TwoLegStandSafeSlowLowPowerDomainRandPPORunnerCfg",
     },
 )
 
@@ -184,6 +196,16 @@ gym.register(
     kwargs={
         "env_cfg_entry_point": f"{__name__}.base_env_cfg:Lite3TwoLegStandSafeSlowLowPowerEnvCfg",
         "rsl_rl_cfg_entry_point": f"{agents.__name__}.rsl_rl_ppo_cfg:Lite3TwoLegStandSafeSlowLowPowerPPORunnerCfg",
+    },
+)
+
+gym.register(
+    id="lite3_two_leg_stand_safe_slow_low_power_domain_rand",
+    entry_point="isaaclab.envs:ManagerBasedRLEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": f"{__name__}.base_env_cfg:Lite3TwoLegStandSafeSlowLowPowerDomainRandEnvCfg",
+        "rsl_rl_cfg_entry_point": f"{agents.__name__}.rsl_rl_ppo_cfg:Lite3TwoLegStandSafeSlowLowPowerDomainRandPPORunnerCfg",
     },
 )
 
