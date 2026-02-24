@@ -78,6 +78,7 @@ export LITE3_DEBUG_DUMP_DIR=/home/sail/Lite3/rl_training_new/lite3_debug/deploy
 Expected ONNX timing line (no manual dt/decimation env vars needed):
 
 ```text
+[ONNX] timing parity check: training(sim_dt=0.005, decimation=4, control_dt=0.02s) vs deploy(sim_dt=0.001, decimation=20, control_dt=0.02s)
 [ONNX] sim_dt=0.001, decimation=20, control_dt=0.02s, sim_dt_source=default_legacy_udp
 ```
 
@@ -99,4 +100,8 @@ python3 rl_training_new/scripts/tools/compare_deploy_train_dumps.py \
   - interface loop: 1 ms
   - policy decimation: 20
   - effective control dt: 0.02 s (matches training control period)
-
+- Deploy now enforces startup timing parity assert:
+  - expected training defaults: `sim.dt=0.005`, `decimation=4`
+  - override only for intentional training timing changes:
+    - `LITE3_TRAINING_SIM_DT`
+    - `LITE3_TRAINING_DECIMATION`
