@@ -37,3 +37,7 @@ _build
 
 
 **/usd/*
+
+# Parity/debug artifacts (generated during local experiments).
+lite3_debug/**
+!lite3_debug/README.md
